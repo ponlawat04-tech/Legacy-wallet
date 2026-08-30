@@ -1,0 +1,6 @@
+{
+  "name": "Legacy wallet",
+  "description": "Secure mobile Multi-Chain & Bitcoin wallet with offline zero-exposure seed phrase vault, air-gapped signing, real-time market data, legacy private key multi-address derivation, and multi-chain support.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
