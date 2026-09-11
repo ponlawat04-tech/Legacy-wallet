@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   TrendingUp,
+  History,
   Activity,
   Zap,
   Clock,
@@ -23,6 +24,7 @@ interface MarketTabProps {
   currency: Currency;
   lang: Language;
   onRefreshMarket: () => void;
+  onNavigateToHistory?: () => void;
 }
 
 export const MarketTab: React.FC<MarketTabProps> = ({
@@ -30,6 +32,7 @@ export const MarketTab: React.FC<MarketTabProps> = ({
   currency,
   lang,
   onRefreshMarket,
+  onNavigateToHistory,
 }) => {
   const [calcBtc, setCalcBtc] = useState<string>('0.01');
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
@@ -54,6 +57,27 @@ export const MarketTab: React.FC<MarketTabProps> = ({
 
   return (
     <div className="space-y-4 pb-20 animate-in fade-in duration-300">
+      {/* Activity & Market Segmented Switcher */}
+      {onNavigateToHistory && (
+        <div className="flex items-center p-1 rounded-2xl bg-slate-900 border border-slate-800 shadow-inner">
+          <button
+            type="button"
+            onClick={onNavigateToHistory}
+            className="flex-1 py-2 px-3 rounded-xl text-slate-400 hover:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all hover:bg-slate-800/60"
+          >
+            <History className="w-3.5 h-3.5 text-amber-400" />
+            <span>{lang === 'th' ? 'ประวัติรายการ (History)' : 'Tx History'}</span>
+          </button>
+          <button
+            type="button"
+            className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-500/20"
+          >
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>{lang === 'th' ? 'สภาวะตลาด & ค่าธรรมเนียม' : 'Market & Fees'}</span>
+          </button>
+        </div>
+      )}
+
       {/* Price Banner */}
       <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl relative overflow-hidden">
         <div className="flex items-center justify-between mb-2">
@@ -90,28 +114,36 @@ export const MarketTab: React.FC<MarketTabProps> = ({
 
         <div className="grid grid-cols-2 gap-3 mt-4 pt-3 border-t border-slate-800 text-xs">
           <div>
-            <span className="text-slate-500 text-[11px]">24h High:</span>
+            <span className="text-slate-500 text-[11px]">
+              {lang === 'th' ? 'ราคาสูงสุด 24 ชม. (High):' : '24h High:'}
+            </span>
             <span className="font-mono text-slate-200 font-semibold block mt-0.5">
-              ${market.high24h.toLocaleString('en-US')}
+              {currency === 'THB'
+                ? `฿${(market.high24hThb || Math.round(market.high24h * (market.priceThb / (market.priceUsd || 1)))).toLocaleString('th-TH')}`
+                : `$${market.high24h.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </span>
           </div>
           <div>
-            <span className="text-slate-500 text-[11px]">24h Low:</span>
+            <span className="text-slate-500 text-[11px]">
+              {lang === 'th' ? 'ราคาต่ำสุด 24 ชม. (Low):' : '24h Low:'}
+            </span>
             <span className="font-mono text-slate-200 font-semibold block mt-0.5">
-              ${market.low24h.toLocaleString('en-US')}
+              {currency === 'THB'
+                ? `฿${(market.low24hThb || Math.round(market.low24h * (market.priceThb / (market.priceUsd || 1)))).toLocaleString('th-TH')}`
+                : `$${market.low24h.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Multi-Chain Live Rates Matrix */}
+      {/* Bitcoin & Hard Fork Live Rates Matrix */}
       <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-            <Globe className="w-4 h-4 text-indigo-400" />
-            {lang === 'th' ? 'ราคาตลาด Multi-Chain หลักทั้งหมด (Live Rates)' : 'All Major Multi-Chain Live Rates'}
+            <Globe className="w-4 h-4 text-amber-400" />
+            {lang === 'th' ? 'ราคาบิตคอยน์และเหรียญแยกสาขา (Bitcoin & Hard Forks)' : 'Bitcoin & Hard Fork Assets Live Rates'}
           </h3>
-          <span className="text-[10px] text-indigo-400 font-mono bg-indigo-500/10 px-2 py-0.5 rounded-md border border-indigo-500/20">
+          <span className="text-[10px] text-amber-400 font-mono bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
             {SUPPORTED_MULTI_CHAINS.length} Coins
           </span>
         </div>

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { ActiveTab, Language } from '../types/wallet';
 import { i18n } from '../utils/i18n';
+import { triggerHaptic } from '../utils/haptics';
 
 interface MobileFrameProps {
   activeTab: ActiveTab;
@@ -81,13 +82,11 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({
     }
   };
 
-  const tabs: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
+  const tabs: { id: ActiveTab; label: string; icon: React.ReactNode; matches?: ActiveTab[] }[] = [
     { id: 'home', label: t.tabHome, icon: <Wallet className="w-5 h-5" /> },
-    { id: 'market', label: t.tabMarket, icon: <TrendingUp className="w-5 h-5" /> },
-    { id: 'send', label: t.tabSend, icon: <Send className="w-5 h-5" /> },
+    { id: 'send', label: lang === 'th' ? 'โอน/เซ็น' : 'Send & Sign', icon: <Send className="w-5 h-5" />, matches: ['send', 'airgap'] },
     { id: 'receive', label: t.tabReceive, icon: <QrCode className="w-5 h-5" /> },
-    { id: 'airgap', label: t.tabAirGap, icon: <ShieldCheck className="w-5 h-5" /> },
-    { id: 'history', label: t.tabHistory, icon: <History className="w-5 h-5" /> },
+    { id: 'history', label: t.tabHistory, icon: <History className="w-5 h-5" />, matches: ['history', 'market'] },
     { id: 'security', label: t.tabSecurity, icon: <Lock className="w-5 h-5" /> },
   ];
 
@@ -147,7 +146,7 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({
               ) : (
                 <span className="flex items-center gap-1 text-emerald-400 font-bold">
                   <Wifi className="w-3 h-3" />
-                  <span className="text-[9px]">MAINNET</span>
+                  <span className="text-[9px]">BITCOIN</span>
                 </span>
               )}
               <BatteryCharging className="w-3.5 h-3.5 text-emerald-400" />
@@ -177,15 +176,18 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({
         )}
 
         {/* Bottom Navigation Bar */}
-        <nav className="sticky sm:absolute bottom-0 inset-x-0 bg-slate-950/95 backdrop-blur-2xl border-t border-slate-800/90 px-1 sm:px-2 py-2 flex items-center justify-around z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.8)] safe-bottom">
+        <nav className="sticky sm:absolute bottom-0 inset-x-0 bg-slate-950/95 backdrop-blur-2xl border-t border-slate-800/90 px-1.5 sm:px-3 py-2 flex items-center justify-around z-30 shadow-[0_-10px_30px_rgba(0,0,0,0.8)] safe-bottom">
           {tabs.map((tab) => {
-            const isActive = activeTab === tab.id;
+            const isActive = activeTab === tab.id || Boolean(tab.matches?.includes(activeTab));
             return (
               <button
                 key={tab.id}
                 type="button"
-                onClick={() => onTabChange(tab.id)}
-                className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-2xl transition-all relative group flex-1 max-w-[58px] ${
+                onClick={() => {
+                  triggerHaptic('light');
+                  onTabChange(tab.id);
+                }}
+                className={`flex flex-col items-center justify-center py-1 px-1 rounded-2xl transition-all relative group flex-1 max-w-[76px] ${
                   isActive
                     ? 'text-amber-400 font-bold'
                     : 'text-slate-400 hover:text-slate-200 font-medium'
@@ -200,7 +202,7 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({
                   {tab.icon}
                 </div>
 
-                <span className={`text-[9.5px] mt-1 tracking-tight truncate max-w-full relative z-10 ${isActive ? 'font-bold text-amber-300' : 'text-slate-400'}`}>
+                <span className={`text-[10px] sm:text-[10.5px] mt-1 tracking-tight truncate max-w-full relative z-10 ${isActive ? 'font-bold text-amber-300' : 'text-slate-400'}`}>
                   {tab.label}
                 </span>
 

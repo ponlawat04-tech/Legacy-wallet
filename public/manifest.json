@@ -1,0 +1,27 @@
+{
+  "short_name": "LegacyWallet",
+  "name": "Legacy wallet - Cold Storage & Air-Gap Vault",
+  "description": "Secure mobile Multi-Chain & Bitcoin wallet with offline zero-exposure seed phrase vault, air-gapped signing, and multi-chain support.",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "192x192 512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "display": "standalone",
+  "orientation": "portrait",
+  "permissions": [
+    "camera"
+  ]
+}

@@ -1,14 +1,16 @@
 import { MarketData, Transaction } from '../types/wallet';
 
-// Default initial live/mock Bitcoin market stats
+// Default initial live Bitcoin market stats
 export const INITIAL_MARKET_DATA: MarketData = {
-  priceUsd: 94850.00,
-  priceThb: 3224900.00,
-  change24h: 3.84,
-  high24h: 96200.00,
-  low24h: 91400.00,
-  marketCapUsd: 1870000000000,
-  volume24hUsd: 42500000000,
+  priceUsd: 77300.00,
+  priceThb: 2558000.00,
+  change24h: -1.85,
+  high24h: 78800.00,
+  low24h: 76650.00,
+  high24hThb: 2608000.00,
+  low24hThb: 2537000.00,
+  marketCapUsd: 1530000000000,
+  volume24hUsd: 32500000000,
   mempoolUnconfirmedTx: 142500,
   currentBlock: 884120,
   nextHalvingBlock: 1050000,
@@ -22,24 +24,26 @@ export const INITIAL_MARKET_DATA: MarketData = {
   pingMs: 18,
   isOnline: true,
   forkPrices: {
-    BCH: 385.50,
-    BSV: 58.20,
-    BTG: 32.80,
-    XEC: 0.000038
+    BCH: 227.10,
+    BSV: 15.90,
+    BTG: 0.24,
+    XEC: 0.00000725
   }
 };
 
 /**
- * Fetch real live Bitcoin prices, Block height & Mempool fee rates from CoinGecko, Mempool.space, & Binance
+ * Fetch real live Bitcoin prices, 24h High/Low, Block height & Mempool fee rates
+ * Redundant sources: CoinGecko, Binance 24hr Ticker, Kraken Ticker, and Mempool.space
  */
 export async function fetchLiveMarketData(): Promise<MarketData> {
   const startTime = performance.now();
   try {
-    const [priceRes, feesRes, blockHeightRes, forkPriceRes] = await Promise.allSettled([
-      fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,bitcoin-cash,bitcoin-cash-sv,bitcoin-gold,ecash&vs_currencies=usd,thb&include_24hr_change=true&include_24hr_vol=true&include_24hr_high=true&include_24hr_low=true'),
+    const [priceRes, feesRes, blockHeightRes, binanceRes, krakenRes] = await Promise.allSettled([
+      fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,bitcoin-cash,bitcoin-cash-sv,bitcoin-gold,ecash&vs_currencies=usd,thb&include_24hr_change=true&include_24hr_vol=true'),
       fetch('https://mempool.space/api/v1/fees/recommended'),
       fetch('https://mempool.space/api/blocks/tip/height'),
-      fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT')
+      fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT'),
+      fetch('https://api.kraken.com/0/public/Ticker?pair=XBTUSD')
     ]);
 
     const pingMs = Math.round(performance.now() - startTime);
@@ -49,58 +53,112 @@ export async function fetchLiveMarketData(): Promise<MarketData> {
     let change24h = INITIAL_MARKET_DATA.change24h;
     let high24h = INITIAL_MARKET_DATA.high24h;
     let low24h = INITIAL_MARKET_DATA.low24h;
+    let volume24hUsd = INITIAL_MARKET_DATA.volume24hUsd;
 
     let forkPrices = { ...INITIAL_MARKET_DATA.forkPrices! };
     let chainPrices: Record<string, number> = {
       BTC: priceUsd,
-      ETH: 2680.00,
-      SOL: 188.50,
-      BNB: 645.00,
-      TRX: 0.245,
-      DOGE: 0.265,
-      LTC: 112.50,
-      BCH: 385.50,
-      AVAX: 32.40,
-      POL: 0.48,
+      BCH: 227.10,
+      BSV: 15.90,
+      BTG: 0.24,
+      XEC: 0.00000725,
     };
 
-    if (priceRes.status === 'fulfilled' && priceRes.value.ok) {
-      const data = await priceRes.value.json();
-      if (data.bitcoin) {
-        priceUsd = data.bitcoin.usd || priceUsd;
-        priceThb = data.bitcoin.thb || priceThb;
-        change24h = data.bitcoin.usd_24h_change || change24h;
-        high24h = data.bitcoin.usd_24h_high || high24h;
-        low24h = data.bitcoin.usd_24h_low || low24h;
-        chainPrices.BTC = priceUsd;
-      }
-      if (data['bitcoin-cash']?.usd) {
-        forkPrices.BCH = data['bitcoin-cash'].usd;
-        chainPrices.BCH = data['bitcoin-cash'].usd;
-      }
-      if (data['bitcoin-cash-sv']?.usd) forkPrices.BSV = data['bitcoin-cash-sv'].usd;
-      if (data['bitcoin-gold']?.usd) forkPrices.BTG = data['bitcoin-gold'].usd;
-      if (data['ecash']?.usd) forkPrices.XEC = data['ecash'].usd;
-      if (data.ethereum?.usd) chainPrices.ETH = data.ethereum.usd;
-      if (data.solana?.usd) chainPrices.SOL = data.solana.usd;
-      if (data.binancecoin?.usd) chainPrices.BNB = data.binancecoin.usd;
-      if (data.tron?.usd) chainPrices.TRX = data.tron.usd;
-      if (data.dogecoin?.usd) chainPrices.DOGE = data.dogecoin.usd;
-      if (data.litecoin?.usd) chainPrices.LTC = data.litecoin.usd;
-      if (data['avalanche-2']?.usd) chainPrices.AVAX = data['avalanche-2'].usd;
-      if (data['matic-network']?.usd) chainPrices.POL = data['matic-network'].usd;
-    } else if (forkPriceRes.status === 'fulfilled' && forkPriceRes.value.ok) {
-      // Binance Fallback for BTC Price
-      const binanceData = await forkPriceRes.value.json();
-      if (binanceData.lastPrice) {
-        priceUsd = parseFloat(binanceData.lastPrice);
-        priceThb = priceUsd * 34.0;
-        change24h = parseFloat(binanceData.priceChangePercent) || change24h;
-        high24h = parseFloat(binanceData.highPrice) || high24h;
-        low24h = parseFloat(binanceData.lowPrice) || low24h;
-        chainPrices.BTC = priceUsd;
+    // 1. Process Binance 24hr Ticker (Authoritative real-time 24h High, 24h Low & Volume)
+    if (binanceRes.status === 'fulfilled' && binanceRes.value.ok) {
+      try {
+        const binanceData = await binanceRes.value.json();
+        if (binanceData.highPrice) {
+          const parsedHigh = parseFloat(binanceData.highPrice);
+          if (!isNaN(parsedHigh) && parsedHigh > 1000) high24h = parsedHigh;
+        }
+        if (binanceData.lowPrice) {
+          const parsedLow = parseFloat(binanceData.lowPrice);
+          if (!isNaN(parsedLow) && parsedLow > 1000) low24h = parsedLow;
+        }
+        if (binanceData.lastPrice) {
+          const parsedPrice = parseFloat(binanceData.lastPrice);
+          if (!isNaN(parsedPrice) && parsedPrice > 1000) priceUsd = parsedPrice;
+        }
+        if (binanceData.priceChangePercent) {
+          const parsedChange = parseFloat(binanceData.priceChangePercent);
+          if (!isNaN(parsedChange)) change24h = parsedChange;
+        }
+        if (binanceData.quoteVolume) {
+          const parsedVol = parseFloat(binanceData.quoteVolume);
+          if (!isNaN(parsedVol) && parsedVol > 0) volume24hUsd = parsedVol;
+        }
+      } catch {
+        // Fall through to other sources
       }
     }
+
+    // 2. Secondary fallback for 24h High/Low via Kraken
+    if ((high24h === INITIAL_MARKET_DATA.high24h || low24h === INITIAL_MARKET_DATA.low24h) &&
+        krakenRes.status === 'fulfilled' && krakenRes.value.ok) {
+      try {
+        const krakenData = await krakenRes.value.json();
+        const pair = krakenData.result?.XXBTZUSD || krakenData.result?.XBTUSD;
+        if (pair) {
+          if (pair.h?.[1]) {
+            const parsedHigh = parseFloat(pair.h[1]);
+            if (!isNaN(parsedHigh) && parsedHigh > 1000) high24h = parsedHigh;
+          }
+          if (pair.l?.[1]) {
+            const parsedLow = parseFloat(pair.l[1]);
+            if (!isNaN(parsedLow) && parsedLow > 1000) low24h = parsedLow;
+          }
+        }
+      } catch {
+        // Ignore Kraken parse error
+      }
+    }
+
+    // 3. Process CoinGecko (Primary for THB conversion, forks, and market cap)
+    if (priceRes.status === 'fulfilled' && priceRes.value.ok) {
+      try {
+        const data = await priceRes.value.json();
+        if (data.bitcoin) {
+          if (data.bitcoin.usd) priceUsd = data.bitcoin.usd;
+          if (data.bitcoin.thb) priceThb = data.bitcoin.thb;
+          if (data.bitcoin.usd_24h_change !== undefined && data.bitcoin.usd_24h_change !== null) {
+            change24h = data.bitcoin.usd_24h_change;
+          }
+          if (data.bitcoin.usd_24h_vol) {
+            volume24hUsd = data.bitcoin.usd_24h_vol;
+          }
+          chainPrices.BTC = priceUsd;
+        }
+        if (data['bitcoin-cash']?.usd) {
+          forkPrices.BCH = data['bitcoin-cash'].usd;
+          chainPrices.BCH = data['bitcoin-cash'].usd;
+        }
+        if (data['bitcoin-cash-sv']?.usd) {
+          forkPrices.BSV = data['bitcoin-cash-sv'].usd;
+          chainPrices.BSV = data['bitcoin-cash-sv'].usd;
+        }
+        if (data['bitcoin-gold']?.usd) {
+          forkPrices.BTG = data['bitcoin-gold'].usd;
+          chainPrices.BTG = data['bitcoin-gold'].usd;
+        }
+        if (data['ecash']?.usd) {
+          forkPrices.XEC = data['ecash'].usd;
+          chainPrices.XEC = data['ecash'].usd;
+        }
+      } catch {
+        // Continue with Binance/cached data
+      }
+    }
+
+    // Calculate THB conversion for High/Low
+    const effectiveUsdToThb = priceUsd > 0 && priceThb > 0 ? (priceThb / priceUsd) : 33.1;
+    if (!priceThb || priceThb === INITIAL_MARKET_DATA.priceThb) {
+      priceThb = Math.round(priceUsd * effectiveUsdToThb);
+    }
+    const high24hThb = Math.round(high24h * effectiveUsdToThb);
+    const low24hThb = Math.round(low24h * effectiveUsdToThb);
+
+    chainPrices.BTC = priceUsd;
 
     let feeEstimates = INITIAL_MARKET_DATA.feeEstimates;
     if (feesRes.status === 'fulfilled' && feesRes.value.ok) {
@@ -129,6 +187,9 @@ export async function fetchLiveMarketData(): Promise<MarketData> {
       change24h,
       high24h,
       low24h,
+      high24hThb,
+      low24hThb,
+      volume24hUsd,
       currentBlock,
       feeEstimates,
       pingMs: pingMs > 0 ? pingMs : 18,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Wifi, WifiOff, ShieldCheck, Globe, DollarSign, Wallet, Lock, ChevronDown, Key, Layers, Camera, QrCode, Snowflake } from 'lucide-react';
+import { Wifi, WifiOff, ShieldCheck, Globe, DollarSign, Wallet, Lock, ChevronDown, Key, Layers, Camera, QrCode, Snowflake, Cpu } from 'lucide-react';
 import { Currency, Language, WalletAccount } from '../types/wallet';
 import { i18n } from '../utils/i18n';
 
@@ -14,6 +14,7 @@ interface HeaderBarProps {
   onOpenVaultModal: () => void;
   onOpenWalletManager?: () => void;
   onOpenQrScanner?: () => void;
+  onOpenSpvModal?: () => void;
   onLockApp?: () => void;
   vaultFrozen?: boolean;
   onToggleFreeze?: () => void;
@@ -30,11 +31,13 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   onOpenVaultModal,
   onOpenWalletManager,
   onOpenQrScanner,
+  onOpenSpvModal,
   onLockApp,
   vaultFrozen = false,
   onToggleFreeze,
 }) => {
   const t = i18n[lang];
+  const isMaster = account.keySource === 'master_private_key';
   const isKey = account.keySource === 'private_key';
 
   return (
@@ -51,14 +54,18 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           style={{
             background: account.color
               ? `linear-gradient(135deg, ${account.color}, #0f172a)`
+              : isMaster
+              ? 'linear-gradient(135deg, #06b6d4, #0891b2)'
               : isKey
               ? 'linear-gradient(135deg, #a855f7, #6b21a8)'
               : 'linear-gradient(135deg, #f59e0b, #d97706)',
-            boxShadow: `0 4px 12px ${account.color ? `${account.color}33` : isKey ? '#a855f733' : '#f59e0b33'}`,
+            boxShadow: `0 4px 12px ${account.color ? `${account.color}33` : isMaster ? '#06b6d433' : isKey ? '#a855f733' : '#f59e0b33'}`,
           }}
         >
           <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
-            {isKey ? (
+            {isMaster ? (
+              <Key className="w-3.5 h-3.5 text-cyan-400" />
+            ) : isKey ? (
               <Key className="w-3.5 h-3.5 text-purple-400" />
             ) : (
               <span className="font-extrabold text-amber-400 text-sm leading-none">₿</span>
@@ -90,17 +97,42 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         </div>
       </button>
 
-      {/* Control Buttons */}
-      <div className="flex items-center gap-1 shrink-0">
-        {/* QR Private Key Scanner Button */}
-        {onOpenQrScanner && (
+      {/* Control Buttons Cluster */}
+      <div className="flex items-center gap-1.5 shrink-0">
+        {/* Air Gap Network Toggle */}
+        <button
+          type="button"
+          onClick={onToggleAirGap}
+          className={`px-2 py-1 rounded-xl text-[10.5px] font-bold flex items-center gap-1 transition-all border shadow-sm active:scale-95 ${
+            airGapMode
+              ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+              : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
+          }`}
+          title={airGapMode ? t.offlineMode : t.onlineMode}
+        >
+          {airGapMode ? (
+            <>
+              <WifiOff className="w-3 h-3 text-amber-400" />
+              <span className="hidden xs:inline sm:inline">Air-Gap</span>
+            </>
+          ) : (
+            <>
+              <Wifi className="w-3 h-3 text-emerald-400" />
+              <span className="hidden xs:inline sm:inline">Online</span>
+            </>
+          )}
+        </button>
+
+        {/* SPV Node Quick Button */}
+        {onOpenSpvModal && (
           <button
             type="button"
-            onClick={onOpenQrScanner}
-            className="p-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 transition-all active:scale-95 shadow-sm"
-            title={lang === 'th' ? 'สแกน QR Code Private Key' : 'Scan Private Key QR'}
+            onClick={onOpenSpvModal}
+            className="p-1.5 sm:px-2 sm:py-1 rounded-xl text-[10.5px] font-bold flex items-center gap-1 transition-all border shadow-sm active:scale-95 bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20"
+            title={lang === 'th' ? 'โหนด SPV ไร้ตัวกลาง (bitcoinj Engine)' : 'Decentralized SPV Node (bitcoinj)'}
           >
-            <Camera className="w-3.5 h-3.5" />
+            <Cpu className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">SPV</span>
           </button>
         )}
 
@@ -108,7 +140,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         <button
           type="button"
           onClick={onToggleFreeze}
-          className={`px-2 py-1 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-all border shadow-sm active:scale-95 ${
+          className={`p-1.5 sm:px-2 sm:py-1 rounded-xl text-[10.5px] font-bold flex items-center gap-1 transition-all border shadow-sm active:scale-95 ${
             vaultFrozen
               ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 animate-pulse shadow-cyan-500/20'
               : 'bg-slate-900 hover:bg-slate-800 text-slate-400 border-slate-800'
@@ -119,52 +151,44 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               : (lang === 'th' ? 'สถานะกระเป๋า: ปกติ (คลิกเพื่อแช่แข็งด้วย PIN)' : 'Vault Status: Active (Click to freeze with PIN)')
           }
         >
-          <Snowflake className={`w-3 h-3 ${vaultFrozen ? 'text-cyan-300' : 'text-slate-400'}`} />
-          <span>{vaultFrozen ? (lang === 'th' ? 'แช่แข็ง ❄️' : 'Frozen') : (lang === 'th' ? 'ปกติ' : 'Ready')}</span>
-        </button>
-
-        {/* Air Gap Network Toggle */}
-        <button
-          type="button"
-          onClick={onToggleAirGap}
-          className={`px-2 py-1 rounded-xl text-[10px] font-bold flex items-center gap-1 transition-all border shadow-sm active:scale-95 ${
-            airGapMode
-              ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
-              : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40'
-          }`}
-          title={airGapMode ? t.offlineMode : t.onlineMode}
-        >
-          {airGapMode ? (
-            <>
-              <WifiOff className="w-3 h-3 text-amber-400" />
-              <span>{lang === 'th' ? 'Air-Gap' : 'Air-Gap'}</span>
-            </>
-          ) : (
-            <>
-              <Wifi className="w-3 h-3 text-emerald-400" />
-              <span>{lang === 'th' ? 'Online' : 'Online'}</span>
-            </>
+          <Snowflake className={`w-3.5 h-3.5 ${vaultFrozen ? 'text-cyan-300' : 'text-slate-400'}`} />
+          {vaultFrozen && (
+            <span className="hidden sm:inline text-cyan-300 font-bold">{lang === 'th' ? 'แช่แข็ง' : 'Frozen'}</span>
           )}
         </button>
 
-        {/* Currency Switcher */}
-        <button
-          type="button"
-          onClick={onToggleCurrency}
-          className="px-2 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 text-[10.5px] font-bold transition-all active:scale-95"
-        >
-          {currency === 'THB' ? '฿ THB' : '$ USD'}
-        </button>
+        {/* Consolidated Currency & Language Pill */}
+        <div className="flex items-center rounded-xl bg-slate-900 border border-slate-800 p-0.5">
+          <button
+            type="button"
+            onClick={onToggleCurrency}
+            className="px-1.5 py-0.5 rounded-lg text-[10px] font-bold text-slate-200 hover:text-amber-400 transition-colors"
+            title={lang === 'th' ? 'สลับสกุลเงิน (THB / USD)' : 'Toggle Currency (THB / USD)'}
+          >
+            {currency === 'THB' ? '฿' : '$'}
+          </button>
+          <div className="w-[1px] h-3 bg-slate-800" />
+          <button
+            type="button"
+            onClick={onToggleLang}
+            className="px-1.5 py-0.5 rounded-lg text-[10px] font-bold text-slate-400 hover:text-slate-200 transition-colors"
+            title={lang === 'th' ? 'สลับภาษา (TH / EN)' : 'Toggle Language (TH / EN)'}
+          >
+            {lang.toUpperCase()}
+          </button>
+        </div>
 
-        {/* Language Switcher */}
-        <button
-          type="button"
-          onClick={onToggleLang}
-          className="px-2 py-1 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-[10.5px] font-bold flex items-center gap-1 transition-all active:scale-95"
-        >
-          <Globe className="w-3 h-3 text-slate-400" />
-          <span>{lang === 'th' ? 'TH' : 'EN'}</span>
-        </button>
+        {/* QR Scanner Quick Button */}
+        {onOpenQrScanner && (
+          <button
+            type="button"
+            onClick={onOpenQrScanner}
+            className="p-1.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 transition-all active:scale-95 shadow-sm"
+            title={lang === 'th' ? 'สแกน QR Code Private Key' : 'Scan Private Key QR'}
+          >
+            <Camera className="w-3.5 h-3.5" />
+          </button>
+        )}
 
         {/* Lock App Quick Button */}
         {onLockApp && (

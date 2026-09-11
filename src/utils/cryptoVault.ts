@@ -1,5 +1,14 @@
 import { AddressType, WalletAccount, ZeroExposureVault } from '../types/wallet';
 import { BIP39_ENGLISH_WORDS } from './bip39Words';
+import {
+  parseAndValidatePrivateKey,
+  parseExtendedPrivateKey,
+  deriveRealAddressesFromPrivateKey,
+  deriveBip39SeedSync,
+  deriveMasterKeyFromSeed,
+  deriveHdPath,
+  deriveChildFromExtendedKey,
+} from './bitcoinKeyEngine';
 
 // Cryptographic Seed & Key Utilities with Zero-Exposure Vault Safeguards
 
@@ -204,21 +213,31 @@ export function generateOfflinePrivateKey(): { hex: string; wif: string } {
 }
 
 /**
- * Validate Bitcoin WIF or Hex Private Key
+ * Validate Bitcoin WIF, Hex Private Key, or BIP-32 Master Private Key (xprv, yprv, zprv, tprv)
  */
-export function validatePrivateKey(keyStr: string): { valid: boolean; error?: string } {
+export function validatePrivateKey(keyStr: string): {
+  valid: boolean;
+  error?: string;
+  format?: string;
+  formatLabel?: string;
+} {
   const clean = keyStr.trim();
   if (clean.length === 0) return { valid: false, error: 'Private key cannot be empty' };
+
+  const parsed = parseAndValidatePrivateKey(clean);
+  if (parsed) {
+    return { valid: true, format: parsed.format, formatLabel: parsed.formatLabel };
+  }
   
   // WIF compressed (51 chars starting with K or L) or WIF uncompressed (52 chars starting with 5) or Hex (64 chars)
   if (clean.length === 64 && /^[0-9a-fA-F]+$/.test(clean)) {
-    return { valid: true };
+    return { valid: true, format: 'hex_64', formatLabel: 'Raw 256-bit Hex Key' };
   }
   if ((clean.length === 51 || clean.length === 52) && /^[1-9A-HJ-NP-Za-km-z]+$/.test(clean)) {
-    return { valid: true };
+    return { valid: true, format: 'wif', formatLabel: 'WIF Key' };
   }
   
-  return { valid: false, error: 'Invalid Private Key format. Enter 64-character Hex or 51-52 WIF format.' };
+  return { valid: false, error: 'Invalid format. Supported: WIF (K/L/5...), 64-Hex, or Master Private Key (xprv, yprv, zprv, tprv).' };
 }
 
 /**
@@ -271,53 +290,94 @@ export async function deriveBitcoinAddress(
   type: AddressType = 'native_segwit',
   passphrase?: string
 ): Promise<{ address: string; publicKey: string; fingerprint: string }> {
+  const clean = seedOrKey.trim();
   const cleanPassphrase = passphrase?.trim() || '';
-  const isSeed = seedOrKey.trim().split(/\s+/).length >= 12;
+  const isSeed = clean.split(/\s+/).length >= 12;
 
-  let seedBytes: Uint8Array;
   if (isSeed) {
-    seedBytes = await deriveBip39Seed(seedOrKey, cleanPassphrase);
-  } else {
-    const encoder = new TextEncoder();
-    const extraPassphrase = cleanPassphrase ? `_PASSPHRASE_EXT_${cleanPassphrase}` : '';
-    const rawData = encoder.encode(seedOrKey + 'BTC_COLD_VAULT_DERIVATION_SALT' + extraPassphrase);
-    const h1 = await crypto.subtle.digest('SHA-256', rawData);
-    const h2 = await crypto.subtle.digest('SHA-256', new Uint8Array(h1));
-    seedBytes = new Uint8Array(64);
-    seedBytes.set(new Uint8Array(h1), 0);
-    seedBytes.set(new Uint8Array(h2), 32);
+    const seedBytes = deriveBip39SeedSync(clean, cleanPassphrase);
+    const master = deriveMasterKeyFromSeed(seedBytes);
+
+    let path = "m/84'/0'/0'/0/0";
+    if (type === 'legacy') path = "m/44'/0'/0'/0/0";
+    else if (type === 'nested_segwit') path = "m/49'/0'/0'/0/0";
+    else if (type === 'taproot') path = "m/86'/0'/0'/0/0";
+
+    const childKey = deriveHdPath(master.key, master.chainCode, path);
+    const derived = deriveRealAddressesFromPrivateKey(childKey, true);
+
+    let address = derived.nativeSegwit;
+    if (type === 'legacy') address = derived.legacyCompressed;
+    else if (type === 'nested_segwit') address = derived.nestedSegwit;
+    else if (type === 'taproot') address = derived.taproot;
+
+    return {
+      address,
+      publicKey: derived.pubKeyCompressedHex,
+      fingerprint: derived.fingerprint,
+    };
   }
 
-  // Step 1: Compute Primary SHA-256 of derived seed
-  const hash1Buffer = await crypto.subtle.digest('SHA-256', seedBytes);
-  const hash1Array = new Uint8Array(hash1Buffer);
-  
-  // Step 2: Compute Secondary SHA-256 (RIPEMD160 / double SHA-256 for public hash)
-  const hash2Buffer = await crypto.subtle.digest('SHA-256', hash1Array);
-  const hash2Array = new Uint8Array(hash2Buffer);
-  
-  const hexHash = Array.from(hash1Array).map(b => b.toString(16).padStart(2, '0')).join('');
-  const fingerprint = hexHash.slice(0, 8).toUpperCase().match(/.{1,4}/g)?.join('-') || '8C3A-9F21';
-  const pubKeyHex = '02' + hexHash.slice(0, 64);
+  // It's a private key (WIF or 64-hex or Casascius minikey or Master Key xprv/yprv/zprv/tprv)
+  const keyDetails = parseAndValidatePrivateKey(clean);
+  if (keyDetails) {
+    if (keyDetails.format === 'master_private_key' && keyDetails.extendedDetails) {
+      const ext = keyDetails.extendedDetails;
+      // If root master key (depth 0), derive path based on addressType
+      // If child key (depth > 0), derive unhardened path 0/0
+      let relPath = '0/0';
+      if (ext.isMaster) {
+        if (type === 'legacy') relPath = "m/44'/0'/0'/0/0";
+        else if (type === 'nested_segwit') relPath = "m/49'/0'/0'/0/0";
+        else if (type === 'taproot') relPath = "m/86'/0'/0'/0/0";
+        else relPath = "m/84'/0'/0'/0/0";
+      }
 
-  let address = '';
-  if (type === 'native_segwit') {
-    // Native SegWit bc1q... (BIP-173 Bech32 with 20-byte witness program)
-    const witnessProgram20 = hash2Array.slice(0, 20);
-    address = encodeBech32Address('bc', 0, witnessProgram20, 'bech32');
-  } else if (type === 'taproot') {
-    // Taproot bc1p... (BIP-350 Bech32m with 32-byte witness program)
-    const witnessProgram32 = hash1Array.slice(0, 32);
-    address = encodeBech32Address('bc', 1, witnessProgram32, 'bech32m');
-  } else {
-    // Legacy 1... (Base58Check with 20-byte hash & double SHA-256 checksum)
-    const payload20 = hash2Array.slice(0, 20);
-    const csBuffer = await crypto.subtle.digest('SHA-256', payload20);
-    const csArray = new Uint8Array(csBuffer);
-    address = encodeBase58Check(0x00, payload20, csArray);
+      const child = deriveChildFromExtendedKey(ext, relPath);
+      const derived = deriveRealAddressesFromPrivateKey(child.privKey, true);
+
+      let address = derived.nativeSegwit;
+      if (type === 'legacy') address = derived.legacyCompressed;
+      else if (type === 'nested_segwit') address = derived.nestedSegwit;
+      else if (type === 'taproot') address = derived.taproot;
+
+      return {
+        address,
+        publicKey: derived.pubKeyCompressedHex,
+        fingerprint: derived.fingerprint,
+      };
+    }
+
+    const derived = deriveRealAddressesFromPrivateKey(keyDetails.privKeyBytes, keyDetails.isCompressed);
+
+    let address = derived.nativeSegwit;
+    if (type === 'legacy') {
+      address = keyDetails.isCompressed ? derived.legacyCompressed : derived.legacyUncompressed;
+    } else if (type === 'nested_segwit') {
+      address = derived.nestedSegwit;
+    } else if (type === 'taproot') {
+      address = derived.taproot;
+    }
+
+    const publicKey = keyDetails.isCompressed ? derived.pubKeyCompressedHex : derived.pubKeyUncompressedHex;
+
+    return {
+      address,
+      publicKey,
+      fingerprint: derived.fingerprint,
+    };
   }
 
-  return { address, publicKey: pubKeyHex, fingerprint };
+  // Fallback for custom mock/test string
+  const encoder = new TextEncoder();
+  const rawData = encoder.encode(clean + 'BTC_COLD_VAULT_DERIVATION_SALT');
+  const h1 = await crypto.subtle.digest('SHA-256', rawData);
+  const hexHash = Array.from(new Uint8Array(h1)).map(b => b.toString(16).padStart(2, '0')).join('');
+  return {
+    address: 'bc1q' + hexHash.slice(0, 38),
+    publicKey: '02' + hexHash.slice(0, 64),
+    fingerprint: hexHash.slice(0, 8).toUpperCase().match(/.{1,4}/g)?.join('-') || '8C3A-9F21',
+  };
 }
 
 /**
@@ -331,12 +391,15 @@ export async function sealZeroExposureVault(
   accountName: string,
   addressType: AddressType = 'native_segwit',
   passphrase?: string,
-  keySource: 'seed_phrase' | 'private_key' = 'seed_phrase',
+  keySource: 'seed_phrase' | 'private_key' | 'master_private_key' = 'seed_phrase',
   keyFormat?: string,
   color?: string
 ): Promise<{ account: WalletAccount; vault: ZeroExposureVault }> {
   const cleanPassphrase = passphrase?.trim();
   const fullSecretToEncrypt = cleanPassphrase ? `${rawSecret} [25TH_WORD:${cleanPassphrase}]` : rawSecret;
+
+  // Check if this secret is an Extended/Master Private Key (xprv, yprv, zprv, tprv)
+  const extKey = parseExtendedPrivateKey(rawSecret);
 
   // 1. Derive Public Address & Public Key incorporating optional 25th word passphrase
   const { address, publicKey, fingerprint } = await deriveBitcoinAddress(rawSecret, addressType, cleanPassphrase);
@@ -387,23 +450,43 @@ export async function sealZeroExposureVault(
 
   const now = Date.now();
 
+  const finalKeySource: 'seed_phrase' | 'private_key' | 'master_private_key' = extKey
+    ? 'master_private_key'
+    : keySource;
+
+  const finalKeyFormat = extKey
+    ? extKey.formatLabel
+    : (keyFormat || (keySource === 'private_key' ? 'WIF / Raw Hex' : '12-word BIP39'));
+
+  let defaultDerivation = addressType === 'native_segwit' ? "m/84'/0'/0'/0/0" : addressType === 'taproot' ? "m/86'/0'/0'/0/0" : "m/44'/0'/0'/0/0";
+  if (extKey) {
+    defaultDerivation = extKey.isMaster ? defaultDerivation : '0/0';
+  }
+
+  const defaultName = extKey
+    ? (extKey.isMaster ? 'Master Private Key Vault' : 'Extended Account Vault')
+    : (keySource === 'private_key' ? 'Private Key Vault' : 'Bitcoin Seed Vault');
+
   const account: WalletAccount = {
     id: `btc-vault-${fingerprint.toLowerCase()}`,
-    name: accountName || (keySource === 'private_key' ? 'Private Key Vault' : 'Bitcoin Seed Vault'),
+    name: accountName || defaultName,
     address,
     addressType,
     publicKey,
     balanceBtc: 0.00000000, // Real initial balance for newly generated/imported vault
     balanceSats: 0,
-    keySource,
-    keyFormat: keyFormat || (keySource === 'private_key' ? 'WIF / Raw Hex' : '12-word BIP39'),
+    keySource: finalKeySource,
+    keyFormat: finalKeyFormat,
     color: color || '#f59e0b',
     isVaultSealed: true,
     sealedTimestamp: now,
-    derivationPath: addressType === 'native_segwit' ? "m/84'/0'/0'/0/0" : addressType === 'taproot' ? "m/86'/0'/0'/0/0" : "m/44'/0'/0'/0/0",
+    derivationPath: defaultDerivation,
     createdOffline: true,
     has25thWord: !!cleanPassphrase,
     passphraseHint: cleanPassphrase ? `${cleanPassphrase.slice(0, 2)}***${cleanPassphrase.slice(-1)}` : undefined,
+    masterFingerprint: extKey ? extKey.fingerprint : undefined,
+    extendedPublicKey: extKey ? extKey.correspondingExtendedPub : undefined,
+    masterKeyDepth: extKey ? extKey.depth : undefined,
   };
 
   const vault: ZeroExposureVault = {
@@ -415,6 +498,63 @@ export async function sealZeroExposureVault(
   };
 
   return { account, vault };
+}
+
+/**
+ * Decrypts the Zero-Exposure Vault encrypted signer key in memory for signing operations
+ * Uses AES-GCM 256-bit and PBKDF2 (100,000 rounds)
+ */
+export async function decryptZeroExposureVault(
+  encryptedSignerKey: string,
+  userPin: string,
+  fingerprint: string
+): Promise<{ success: boolean; decryptedSecret?: string; error?: string }> {
+  try {
+    const parts = encryptedSignerKey.split(':');
+    if (parts.length !== 2) {
+      return { success: false, error: 'Invalid encrypted signer key format' };
+    }
+
+    const [ivHex, encHex] = parts;
+    const iv = new Uint8Array(ivHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
+    const encData = new Uint8Array(encHex.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []);
+
+    const encoder = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(userPin),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveKey']
+    );
+
+    const salt = encoder.encode(`ZERO_EXPOSURE_VAULT_SALT_${fingerprint}`);
+    const derivedKey = await crypto.subtle.deriveKey(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations: 100000,
+        hash: 'SHA-256',
+      },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['decrypt']
+    );
+
+    const decryptedBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      derivedKey,
+      encData
+    );
+
+    const decoder = new TextDecoder();
+    const secret = decoder.decode(decryptedBuffer);
+
+    return { success: true, decryptedSecret: secret };
+  } catch (err: any) {
+    return { success: false, error: 'PIN verification failed or authentication tag mismatch (AES-GCM Authentication Failed)' };
+  }
 }
 
 /**

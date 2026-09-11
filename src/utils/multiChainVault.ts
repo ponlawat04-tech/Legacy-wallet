@@ -159,53 +159,37 @@ export async function deriveMultiChainAddresses(
         break;
       }
 
-      case 'ETH':
-      case 'BNB':
-      case 'AVAX':
-      case 'POL': {
-        // EVM Keccak-256 / SHA-256 public key slice (0x + 40 hex chars)
-        const evmSlice = Array.from(hash1.slice(12, 32)).map(b => b.toString(16).padStart(2, '0')).join('');
-        address = `0x${evmSlice}`;
-        break;
-      }
-
-      case 'SOL': {
-        // Solana 32-byte Ed25519 public key Base58 encoded
-        const solSlice = hash1.slice(0, 32);
-        address = encodeBase58(solSlice);
-        break;
-      }
-
-      case 'TRX': {
-        // TRON TRC-20 Base58Check with 0x41 ('T') prefix
-        const payload20 = hash2.slice(0, 20);
-        const csBuf = await crypto.subtle.digest('SHA-256', payload20);
-        const csArr = new Uint8Array(csBuf);
-        address = encodeBase58Check(0x41, payload20, csArr);
-        break;
-      }
-
-      case 'DOGE': {
-        // Dogecoin Base58Check with 0x1E ('D') prefix
-        const payload20 = hash2.slice(0, 20);
-        const csBuf = await crypto.subtle.digest('SHA-256', payload20);
-        const csArr = new Uint8Array(csBuf);
-        address = encodeBase58Check(0x1e, payload20, csArr);
-        break;
-      }
-
-      case 'LTC': {
-        // Litecoin Native SegWit ltc1q...
-        const witness = hash2.slice(0, 20);
-        address = encodeBech32('ltc', 0, witness);
-        break;
-      }
-
       case 'BCH': {
         // Bitcoin Cash CashAddr
         const witness = hash2.slice(0, 20);
         const bechPart = encodeBech32('bitcoincash', 0, witness);
         address = bechPart.replace('bitcoincash1', 'bitcoincash:q');
+        break;
+      }
+
+      case 'BSV': {
+        // Bitcoin SV Legacy P2PKH (1-prefix)
+        const payload20 = hash2.slice(0, 20);
+        const csBuf = await crypto.subtle.digest('SHA-256', payload20);
+        const csArr = new Uint8Array(csBuf);
+        address = encodeBase58Check(0x00, payload20, csArr);
+        break;
+      }
+
+      case 'BTG': {
+        // Bitcoin Gold P2PKH (G-prefix, version 0x26 = 38)
+        const payload20 = hash2.slice(0, 20);
+        const csBuf = await crypto.subtle.digest('SHA-256', payload20);
+        const csArr = new Uint8Array(csBuf);
+        address = encodeBase58Check(38, payload20, csArr);
+        break;
+      }
+
+      case 'XEC': {
+        // eCash CashAddr
+        const witness = hash2.slice(0, 20);
+        const bechPart = encodeBech32('ecash', 0, witness);
+        address = bechPart.replace('ecash1', 'ecash:q');
         break;
       }
     }
@@ -233,7 +217,7 @@ export async function deriveMultiChainAddresses(
 }
 
 /**
- * Validate any major chain address format
+ * Validate Bitcoin & Hard Fork chain address formats
  */
 export function validateMultiChainAddress(chainId: ChainId, address: string): { valid: boolean; error?: string } {
   const clean = address.trim();
@@ -246,44 +230,29 @@ export function validateMultiChainAddress(chainId: ChainId, address: string): { 
       }
       return { valid: false, error: 'Invalid Bitcoin address format (expected bc1..., 1..., or 3...)' };
 
-    case 'ETH':
-    case 'BNB':
-    case 'AVAX':
-    case 'POL':
-      if (/^0x[0-9a-fA-F]{40}$/.test(clean)) {
-        return { valid: true };
-      }
-      return { valid: false, error: 'Invalid EVM address format (expected 0x followed by 40 hex characters)' };
-
-    case 'SOL':
-      if (clean.length >= 32 && clean.length <= 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(clean)) {
-        return { valid: true };
-      }
-      return { valid: false, error: 'Invalid Solana address format (expected 32-44 Base58 characters)' };
-
-    case 'TRX':
-      if (clean.startsWith('T') && clean.length === 34 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(clean)) {
-        return { valid: true };
-      }
-      return { valid: false, error: 'Invalid TRON address format (expected 34 Base58 characters starting with T)' };
-
-    case 'DOGE':
-      if (clean.startsWith('D') && clean.length >= 30 && clean.length <= 36) {
-        return { valid: true };
-      }
-      return { valid: false, error: 'Invalid Dogecoin address format (expected D-prefix Base58 address)' };
-
-    case 'LTC':
-      if (clean.startsWith('ltc1') || clean.startsWith('L') || clean.startsWith('M')) {
-        return { valid: true };
-      }
-      return { valid: false, error: 'Invalid Litecoin address format (expected ltc1..., L..., or M...)' };
-
     case 'BCH':
       if (clean.startsWith('bitcoincash:q') || clean.startsWith('q') || clean.startsWith('1')) {
         return { valid: true };
       }
       return { valid: false, error: 'Invalid BCH address format (expected bitcoincash:q... or q...)' };
+
+    case 'BSV':
+      if (clean.startsWith('1') && clean.length >= 26 && clean.length <= 35) {
+        return { valid: true };
+      }
+      return { valid: false, error: 'Invalid BSV address format (expected Legacy 1...)' };
+
+    case 'BTG':
+      if ((clean.startsWith('G') || clean.startsWith('1') || clean.startsWith('A')) && clean.length >= 26) {
+        return { valid: true };
+      }
+      return { valid: false, error: 'Invalid BTG address format (expected G... or 1...)' };
+
+    case 'XEC':
+      if (clean.startsWith('ecash:q') || clean.startsWith('q') || clean.startsWith('1')) {
+        return { valid: true };
+      }
+      return { valid: false, error: 'Invalid eCash address format (expected ecash:q... or q...)' };
 
     default:
       return { valid: true };

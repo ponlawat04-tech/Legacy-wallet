@@ -16,11 +16,16 @@ import {
   RotateCcw,
   Trash2,
   Camera,
-  QrCode
+  QrCode,
+  Search,
+  ExternalLink,
+  Copy
 } from 'lucide-react';
 import { AddressType, Language, WalletAccount, ZeroExposureVault } from '../types/wallet';
 import { i18n } from '../utils/i18n';
 import { getWordSuggestions, isValidBip39Word } from '../utils/bip39Words';
+import { detectKeyType } from '../utils/legacyForkScanner';
+import { parseExtendedPrivateKey } from '../utils/bitcoinKeyEngine';
 import {
   generateOfflinePrivateKey,
   generateOfflineSeedPhrase,
@@ -37,6 +42,7 @@ interface OfflineVaultImportModalProps {
   initialSecret?: string;
   initialTab?: '12' | '24' | 'key';
   onOpenQrScanner?: () => void;
+  onOpenScannerWithKey?: (key: string) => void;
 }
 
 const WALLET_COLORS = [
@@ -56,6 +62,7 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
   initialSecret,
   initialTab,
   onOpenQrScanner,
+  onOpenScannerWithKey,
 }) => {
   const [tab, setTab] = useState<'12' | '24' | 'key'>('12');
   const [seedWords, setSeedWords] = useState<string[]>(Array(12).fill(''));
@@ -74,8 +81,36 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [isAirGapped, setIsAirGapped] = useState<boolean>(true);
+  const [copiedPub, setCopiedPub] = useState<boolean>(false);
 
   const t = i18n[lang];
+
+  const handlePrivateKeyInputChange = (val: string) => {
+    setPrivateKeyInput(val);
+    setError(null);
+    const clean = val.trim();
+    if (clean.startsWith('5')) {
+      setAddressType('legacy');
+    } else if (clean.startsWith('zprv') || clean.startsWith('vprv')) {
+      setAddressType('native_segwit');
+    } else if (clean.startsWith('yprv') || clean.startsWith('uprv')) {
+      setAddressType('nested_segwit');
+    }
+  };
+
+  const handleLoadSampleMasterKey = (type: 'xprv' | 'zprv') => {
+    const key =
+      type === 'zprv'
+        ? 'zprvAWgYBBk7JR8GjzqSzmunMCS7dAbwpYTCs1YUMDXqduMA5JFHZ3iX5s2UkAR6vBdcCYYa1S5o1fVLrKsrnpCQ4WpUd6aVUWP1bS2Yy5DoaKv'
+        : 'xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi';
+    handlePrivateKeyInputChange(key);
+    setSelectedColor('#06b6d4');
+    setAccountName(
+      type === 'zprv'
+        ? (lang === 'th' ? 'กระเป๋า SegWit Master Key (zprv)' : 'Native SegWit Master Vault (zprv)')
+        : (lang === 'th' ? 'กระเป๋า Master Key (xprv)' : 'Master Key Vault (xprv)')
+    );
+  };
 
   // Completely wipe and reset all sensitive input states whenever modal opens or closes
   const resetForm = (targetTab: '12' | '24' | 'key' = '12') => {
@@ -89,6 +124,7 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
     setSuggestions([]);
     setError(null);
     setIsProcessing(false);
+    setCopiedPub(false);
     setSelectedColor(targetTab === 'key' ? '#a855f7' : targetTab === '24' ? '#0284c7' : '#f59e0b');
   };
 
@@ -106,8 +142,17 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
           setAccountName(lang === 'th' ? 'กระเป๋า Seed Phrase 12 คำ' : 'Seed Vault (12 words)');
         } else {
           resetForm('key');
-          setPrivateKeyInput(initialSecret.trim());
-          setAccountName(lang === 'th' ? 'กระเป๋า Private Key พิเศษ' : 'Imported Private Key Vault');
+          const cleanKey = initialSecret.trim();
+          handlePrivateKeyInputChange(cleanKey);
+          const isMasterKey = ['xprv', 'yprv', 'zprv', 'tprv', 'uprv', 'vprv'].some(p => cleanKey.startsWith(p));
+          setAccountName(
+            isMasterKey
+              ? (lang === 'th' ? 'กระเป๋า Master Key (xprv)' : 'Master Key Vault (xprv)')
+              : (lang === 'th' ? 'กระเป๋า Private Key พิเศษ' : 'Imported Private Key Vault')
+          );
+          if (isMasterKey) {
+            setSelectedColor('#06b6d4');
+          }
         }
       } else if (initialTab) {
         resetForm(initialTab);
@@ -208,11 +253,34 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
       }
       setSeedWords(parts.map(p => p.toLowerCase()));
       setError(null);
-    } else if (parts.length === 1 && (parts[0].length === 64 || parts[0].length === 51 || parts[0].length === 52)) {
+    } else if (
+      parts.length === 1 &&
+      (parts[0].length === 64 ||
+        parts[0].length === 51 ||
+        parts[0].length === 52 ||
+        parts[0].startsWith('xprv') ||
+        parts[0].startsWith('yprv') ||
+        parts[0].startsWith('zprv') ||
+        parts[0].startsWith('tprv') ||
+        parts[0].startsWith('uprv') ||
+        parts[0].startsWith('vprv') ||
+        parts[0].startsWith('S'))
+    ) {
       setTab('key');
-      setPrivateKeyInput(parts[0]);
+      const cleanKey = parts[0];
+      handlePrivateKeyInputChange(cleanKey);
+      const isMasterKey = ['xprv', 'yprv', 'zprv', 'tprv', 'uprv', 'vprv'].some(p => cleanKey.startsWith(p));
+      if (isMasterKey) {
+        setSelectedColor('#06b6d4');
+        setAccountName(
+          cleanKey.startsWith('zprv')
+            ? (lang === 'th' ? 'กระเป๋า SegWit Master Key (zprv)' : 'Native SegWit Master Vault (zprv)')
+            : (lang === 'th' ? 'กระเป๋า Master Key (xprv)' : 'Master Key Vault (xprv)')
+        );
+      }
+      setError(null);
     } else {
-      setError(lang === 'th' ? 'จำนวนคำที่วางไม่ถูกต้อง (ต้องเป็น 12 หรือ 24 คำ)' : 'Pasted text must be exactly 12 or 24 words.');
+      setError(lang === 'th' ? 'ข้อมูลที่วางไม่ถูกต้อง (ต้องเป็น 12/24 คำ, WIF, 64-Hex หรือ Master Key xprv)' : 'Pasted text must be 12/24 words, WIF, 64-Hex, or Master Key (xprv).');
     }
   };
 
@@ -222,10 +290,12 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
 
     try {
       let secretToSeal = '';
-      const keySource = tab === 'key' ? 'private_key' : 'seed_phrase';
-      const keyFormat = tab === '12' ? '12-word BIP39' : tab === '24' ? '24-word BIP39' : (privateKeyInput.length === 64 ? '64-Hex' : 'WIF');
+      let keySource: 'seed_phrase' | 'private_key' | 'master_private_key' = 'seed_phrase';
+      let keyFormat = '';
 
       if (tab === '12' || tab === '24') {
+        keySource = 'seed_phrase';
+        keyFormat = tab === '12' ? '12-word BIP39' : '24-word BIP39';
         const validation = validateSeedPhrase(seedWords);
         if (!validation.valid) {
           setError(validation.error || 'Invalid seed phrase');
@@ -241,9 +311,22 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
           return;
         }
         secretToSeal = privateKeyInput.trim();
+        if (validation.format === 'master_private_key') {
+          keySource = 'master_private_key';
+          keyFormat = validation.formatLabel || 'BIP-32 Master Extended Key';
+        } else {
+          keySource = 'private_key';
+          keyFormat = validation.formatLabel || (privateKeyInput.length === 64 ? '64-Hex' : 'WIF');
+        }
       }
 
-      const finalName = accountName.trim() || (keySource === 'private_key' ? 'Private Key Vault' : `Seed Vault (${tab} Words)`);
+      const finalName =
+        accountName.trim() ||
+        (keySource === 'master_private_key'
+          ? (lang === 'th' ? 'กระเป๋า Master Key (xprv)' : 'Master Key Vault (xprv)')
+          : keySource === 'private_key'
+          ? (lang === 'th' ? 'กระเป๋า Private Key พิเศษ' : 'Private Key Vault')
+          : `Seed Vault (${tab} Words)`);
 
       // Execute Zero-Exposure Permanent Sealing
       const { account, vault } = await sealZeroExposureVault(
@@ -360,7 +443,7 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
             }`}
           >
             <Key className="w-3.5 h-3.5" />
-            <span>Private Key</span>
+            <span>{lang === 'th' ? 'Private / Master Key' : 'Private / Master Key'}</span>
           </button>
         </div>
 
@@ -405,7 +488,9 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
         ) : (
           <div className="flex items-center justify-between mb-3 text-xs gap-2 flex-wrap">
             <span className="text-slate-400 font-medium">
-              {lang === 'th' ? 'กรอก Private Key (WIF หรือ 64-Hex)' : 'Enter WIF or 64-char Hex Private Key'}
+              {lang === 'th'
+                ? 'กรอก Private Key (WIF, 64-Hex) หรือ Master Key (xprv, yprv, zprv)'
+                : 'Enter WIF, 64-Hex or Master Key (xprv, yprv, zprv)'}
             </span>
             <div className="flex items-center gap-1.5">
               {onOpenQrScanner && (
@@ -415,7 +500,7 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
                   className="inline-flex items-center gap-1 text-purple-300 hover:text-purple-200 font-semibold text-xs bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 px-2.5 py-1 rounded-lg transition-all shadow-sm"
                 >
                   <Camera className="w-3.5 h-3.5 text-purple-300" />
-                  <span>{lang === 'th' ? 'สแกน QR Private Key' : 'Scan Key QR'}</span>
+                  <span>{lang === 'th' ? 'สแกน QR Key' : 'Scan Key QR'}</span>
                 </button>
               )}
               {privateKeyInput && (
@@ -430,11 +515,29 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
               )}
               <button
                 type="button"
+                onClick={() => handleLoadSampleMasterKey('xprv')}
+                className="inline-flex items-center gap-1 text-cyan-400 hover:text-cyan-300 font-semibold text-xs bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 px-2 py-1 rounded-lg transition-all"
+                title="BIP-32 Root Key"
+              >
+                <Key className="w-3 h-3" />
+                <span>{lang === 'th' ? 'ตัวอย่าง xprv' : 'Sample xprv'}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleLoadSampleMasterKey('zprv')}
+                className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300 font-semibold text-xs bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-2 py-1 rounded-lg transition-all"
+                title="BIP-84 Native SegWit"
+              >
+                <Key className="w-3 h-3" />
+                <span>{lang === 'th' ? 'ตัวอย่าง zprv' : 'Sample zprv'}</span>
+              </button>
+              <button
+                type="button"
                 onClick={handleGenerateRandomKey}
                 className="inline-flex items-center gap-1 text-purple-400 hover:text-purple-300 font-semibold text-xs bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 px-2.5 py-1 rounded-lg transition-all"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>{lang === 'th' ? 'สุ่มสร้าง Private Key' : 'Generate Key'}</span>
+                <span>{lang === 'th' ? 'สุ่ม Private Key' : 'Generate Key'}</span>
               </button>
             </div>
           </div>
@@ -558,20 +661,151 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
         ) : (
           <div className="mb-4 space-y-2">
             <label className="block text-xs font-medium text-slate-300">
-              Private Key (WIF เช่น 5K..., L..., K... หรือ 64-Hex)
+              {lang === 'th'
+                ? 'Private Key หรือ Master Private Key (WIF, 64-Hex, xprv, yprv, zprv)'
+                : 'Private Key or Master Private Key (WIF, 64-Hex, xprv, yprv, zprv)'}
             </label>
             <textarea
               value={privateKeyInput}
-              onChange={(e) => setPrivateKeyInput(e.target.value)}
+              onChange={(e) => handlePrivateKeyInputChange(e.target.value)}
               onPaste={handlePasteFullSeed}
-              placeholder={lang === 'th' ? 'วาง Private Key หรือกด "สุ่มสร้าง Private Key" ด้านบน...' : 'Paste WIF / Hex private key or click Generate above...'}
+              placeholder={
+                lang === 'th'
+                  ? 'วาง WIF (5K..., L...), 64-Hex, หรือ Master Key (xprv..., zprv..., yprv...) หรือกดสุ่มสร้าง...'
+                  : 'Paste WIF, 64-Hex, or Master Key (xprv, zprv, yprv) or click Generate above...'
+              }
               rows={3}
               className="w-full bg-slate-950 border border-slate-800 rounded-2xl p-3 text-xs font-mono text-purple-200 focus:outline-none focus:ring-1 focus:ring-purple-500 transition-all"
             />
+            
+            {privateKeyInput.trim() && (
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400 font-medium">
+                    {lang === 'th' ? 'ฟอร์แมตที่ตรวจพบ:' : 'Detected Format:'}
+                  </span>
+                  <span className="font-mono text-amber-300 font-bold">
+                    {detectKeyType(privateKeyInput).label}
+                  </span>
+                </div>
+
+                {detectKeyType(privateKeyInput).type === 'master_private_key' && (() => {
+                  const ext = parseExtendedPrivateKey(privateKeyInput);
+                  if (!ext) {
+                    return (
+                      <div className="text-[11px] text-rose-300 bg-rose-500/15 border border-rose-500/30 p-2.5 rounded-xl space-y-1">
+                        <div className="font-bold flex items-center gap-1.5 text-rose-200">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
+                          <span>
+                            {lang === 'th' ? 'รูปแบบ Master Key ไม่สมบูรณ์ หรือ Checksum ผิดพลาด' : 'Invalid Master Key or Checksum Failure'}
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-rose-200/90 leading-tight">
+                          {lang === 'th'
+                            ? 'กรุณาตรวจสอบว่าคัดลอก Master Key (xprv, yprv, zprv) มาครบ 111 ตัวอักษรและไม่มีตัวอักษรตกหล่น'
+                            : 'Please verify the complete 111-character extended private key is entered without typos.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  const activePath =
+                    addressType === 'native_segwit'
+                      ? "m/84'/0'/0'/0/0"
+                      : addressType === 'nested_segwit'
+                      ? "m/49'/0'/0'/0/0"
+                      : addressType === 'taproot'
+                      ? "m/86'/0'/0'/0/0"
+                      : "m/44'/0'/0'/0/0";
+
+                  return (
+                    <div className="text-[11px] text-purple-200 bg-purple-950/40 border border-purple-500/30 p-3 rounded-xl space-y-2">
+                      <div className="flex items-center justify-between border-b border-purple-500/20 pb-1.5">
+                        <div className="font-bold flex items-center gap-1.5 text-purple-200">
+                          <Sparkles className="w-3.5 h-3.5 text-purple-300" />
+                          <span>{ext.formatLabel}</span>
+                        </div>
+                        <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono text-[9px] font-bold uppercase border border-purple-500/30">
+                          {ext.isMaster ? 'Root Master (m)' : `Depth ${ext.depth}`}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-[10px]">
+                        <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                          <div className="text-slate-400 text-[9px]">{lang === 'th' ? 'Master Fingerprint:' : 'Master Fingerprint:'}</div>
+                          <div className="font-mono text-purple-300 font-bold">{ext.fingerprint}</div>
+                        </div>
+                        <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
+                          <div className="text-slate-400 text-[9px]">{lang === 'th' ? 'เส้นทางอนุพันธ์ (Path):' : 'Derivation Path:'}</div>
+                          <div className="font-mono text-amber-300 font-bold">{ext.isMaster ? activePath : '0/0'}</div>
+                        </div>
+                      </div>
+
+                      {ext.correspondingExtendedPub && (
+                        <div className="bg-slate-900/90 p-2 rounded-lg border border-slate-800 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 text-[9px] font-medium">
+                              {lang === 'th'
+                                ? `Extended Public Key (${ext.extendedPubPrefix}):`
+                                : `Extended Public Key (${ext.extendedPubPrefix}):`}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(ext.correspondingExtendedPub);
+                                setCopiedPub(true);
+                                setTimeout(() => setCopiedPub(false), 2000);
+                              }}
+                              className="text-[9px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 bg-amber-500/10 hover:bg-amber-500/20 px-1.5 py-0.5 rounded transition-all"
+                            >
+                              <Copy className="w-2.5 h-2.5" />
+                              <span>{copiedPub ? (lang === 'th' ? 'คัดลอกแล้ว' : 'Copied') : (lang === 'th' ? 'คัดลอก' : 'Copy')}</span>
+                            </button>
+                          </div>
+                          <p className="font-mono text-[9px] text-slate-300 break-all select-all leading-tight">
+                            {ext.correspondingExtendedPub}
+                          </p>
+                        </div>
+                      )}
+
+                      <p className="text-[10px] text-purple-300/80 leading-tight">
+                        {lang === 'th'
+                          ? '💡 เมื่อซีลกระเป๋า กุญแจหลักจะถูกเข้ารหัสระดับทหาร (AES-GCM-256) และล้างข้อมูลดิบออกจากหน่วยความจำทันที พร้อมอนุพันธ์แอดเดรสตามประเภทที่เลือกด้านล่าง'
+                          : '💡 Upon sealing, the master key is encrypted with AES-GCM-256 and purged from memory, deriving the selected address type.'}
+                      </p>
+                    </div>
+                  );
+                })()}
+
+                {privateKeyInput.trim().startsWith('5') && (
+                  <div className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/30 p-2 rounded-xl">
+                    {lang === 'th'
+                      ? '💡 ตรวจพบ Private Key แบบ Uncompressed (5...) แนะนำให้เลือกประเภท "Legacy (1...)" เพื่อให้แสดงยอดเหรียญถูกต้อง'
+                      : '💡 Detected Uncompressed Private Key (5...). Recommend selecting "Legacy (1...)" to match existing coins.'}
+                  </div>
+                )}
+
+                {onOpenScannerWithKey && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenScannerWithKey(privateKeyInput.trim())}
+                    className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500/20 to-amber-600/20 hover:from-amber-500/30 hover:to-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span>
+                      {lang === 'th'
+                        ? '🔍 สแกนยอดเหรียญสดทุกรูปแบบ (Scan All 5 Formats & Forks)'
+                        : 'Deep Scan All 5 Formats & Hard Forks'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            )}
+
             <p className="text-[10px] text-slate-400">
               {lang === 'th'
-                ? '🔒 Private Key จะถูกนำเข้าเป็นกระเป๋าเดี่ยว (Single-Key Vault) และถูกซีล Zero-Exposure ทันที'
-                : '🔒 Imported as an isolated single-key vault with immediate zero-exposure memory sealing.'}
+                ? '🔒 Key จะถูกนำเข้าเป็นกระเป๋าแยกอิสระ (Isolated Key Vault) และถูกซีล Zero-Exposure ทันที'
+                : '🔒 Imported as an isolated key vault with immediate zero-exposure memory sealing.'}
             </p>
           </div>
         )}
@@ -617,9 +851,14 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
 
           {/* Address Type Selection */}
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">
-              {t.addressTypeLabel}
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-slate-400">
+                {t.addressTypeLabel}
+              </label>
+              <span className="text-[10px] text-slate-500">
+                {lang === 'th' ? 'เลือกให้ตรงกับที่อยู่เดิม' : 'Select to match existing address'}
+              </span>
+            </div>
             <div className="grid grid-cols-2 gap-1.5">
               <label
                 onClick={() => setAddressType('native_segwit')}
@@ -629,8 +868,41 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
                     : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
               >
-                <span>Native SegWit (bc1q)</span>
+                <div>
+                  <div className="font-bold">Native SegWit</div>
+                  <div className="text-[10px] opacity-70 font-mono">bc1q... (BIP-84)</div>
+                </div>
                 {addressType === 'native_segwit' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+              </label>
+
+              <label
+                onClick={() => setAddressType('nested_segwit')}
+                className={`flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all ${
+                  addressType === 'nested_segwit'
+                    ? 'bg-amber-500/10 border-amber-500/50 text-amber-300'
+                    : 'bg-slate-900 border-slate-800 text-slate-400'
+                }`}
+              >
+                <div>
+                  <div className="font-bold">Nested SegWit</div>
+                  <div className="text-[10px] opacity-70 font-mono">3... (BIP-49)</div>
+                </div>
+                {addressType === 'nested_segwit' && <Check className="w-3.5 h-3.5 text-amber-400" />}
+              </label>
+
+              <label
+                onClick={() => setAddressType('legacy')}
+                className={`flex items-center justify-between p-2 rounded-xl border text-xs cursor-pointer transition-all ${
+                  addressType === 'legacy'
+                    ? 'bg-amber-500/10 border-amber-500/50 text-amber-300'
+                    : 'bg-slate-900 border-slate-800 text-slate-400'
+                }`}
+              >
+                <div>
+                  <div className="font-bold">Legacy (P2PKH)</div>
+                  <div className="text-[10px] opacity-70 font-mono">1... (BIP-44)</div>
+                </div>
+                {addressType === 'legacy' && <Check className="w-3.5 h-3.5 text-amber-400" />}
               </label>
 
               <label
@@ -641,7 +913,10 @@ export const OfflineVaultImportModal: React.FC<OfflineVaultImportModalProps> = (
                     : 'bg-slate-900 border-slate-800 text-slate-400'
                 }`}
               >
-                <span>Taproot (bc1p)</span>
+                <div>
+                  <div className="font-bold">Taproot</div>
+                  <div className="text-[10px] opacity-70 font-mono">bc1p... (BIP-86)</div>
+                </div>
                 {addressType === 'taproot' && <Check className="w-3.5 h-3.5 text-amber-400" />}
               </label>
             </div>

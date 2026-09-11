@@ -27,9 +27,13 @@ import {
   Wallet,
   Cpu,
   Camera,
-  QrCode
+  QrCode,
+  ChevronDown,
+  ChevronUp,
+  ArrowDownLeft,
+  ArrowUpRight
 } from 'lucide-react';
-import { Currency, HardForkCoinBalance, Language, MarketData } from '../types/wallet';
+import { Currency, HardForkCoinBalance, Language, MarketData, Transaction } from '../types/wallet';
 import {
   KeyScanResult,
   detectKeyType,
@@ -37,6 +41,7 @@ import {
   ScannedBtcAddressInfo,
   ScannedHardForkCoinInfo
 } from '../utils/legacyForkScanner';
+import { fetchRealAddressTransactions } from '../utils/blockchainApi';
 
 interface LegacyForkScannerModalProps {
   isOpen: boolean;
@@ -49,6 +54,7 @@ interface LegacyForkScannerModalProps {
   onClaimForkCoin: (coin: HardForkCoinBalance) => void;
   initialKey?: string;
   onOpenQrScanner?: () => void;
+  onSelectKeyForImport?: (key: string) => void;
 }
 
 export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
@@ -62,6 +68,7 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
   onClaimForkCoin,
   initialKey = '',
   onOpenQrScanner,
+  onSelectKeyForImport,
 }) => {
   const [inputKey, setInputKey] = useState<string>(initialKey);
   const [passphraseInput, setPassphraseInput] = useState<string>('');
@@ -76,15 +83,28 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
   const [sweepSuccessMessage, setSweepSuccessMessage] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Address-level live transaction inspection
+  const [expandedAddress, setExpandedAddress] = useState<string | null>(null);
+  const [loadingAddressTxs, setLoadingAddressTxs] = useState<{ [address: string]: boolean }>({});
+  const [addressTxs, setAddressTxs] = useState<{ [address: string]: Transaction[] }>({});
+
   // Sample production test keys for demonstration & safety audit exploration
   const SAMPLE_LEGACY_KEYS = [
     {
-      label: lang === 'th' ? 'กุญแจ WIF Compressed (51 หลัก K...)' : 'WIF Compressed (K...)',
+      label: lang === 'th' ? 'WIF Compressed (K...)' : 'WIF Compressed (K...)',
       key: 'Ky1r5m7z6T9wZ4sA3r8vX2bY5cE7nQ9uW1vM3tP6rS8xZ0qL2aB',
     },
     {
-      label: lang === 'th' ? 'กุญแจ 64-Hex ก่อนยุค SegWit (2016)' : 'Vintage 64-Hex Private Key',
+      label: lang === 'th' ? '64-Hex Legacy' : 'Vintage 64-Hex Key',
       key: 'e9873d79c6d87dc0fb6a5778633389f4453213303da61f20bd67fc233aa33262',
+    },
+    {
+      label: lang === 'th' ? 'Master Key (xprv)' : 'Master Key (xprv)',
+      key: 'xprv9s21ZrQH143K3QTDL4LXw2F7HEK3wJUD2nW2nRk4stbPy6cq3jPPqjiChkVvvNKmPGJxWUtg6LnF5kejMRNNU3TGtRBeJgk33yuGBxrMPHi',
+    },
+    {
+      label: lang === 'th' ? 'SegWit Master (zprv)' : 'Native SegWit (zprv)',
+      key: 'zprvAWgYBBk7JR8GjzqSzmunMCS7dAbwpYTCs1YUMDXqduMA5JFHZ3iX5s2UkAR6vBdcCYYa1S5o1fVLrKsrnpCQ4WpUd6aVUWP1bS2Yy5DoaKv',
     },
   ];
 
@@ -96,7 +116,29 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
     setErrorMsg(null);
     setSweepSuccessMessage(null);
     setIsScanning(false);
+    setExpandedAddress(null);
+    setAddressTxs({});
     onClose();
+  };
+
+  const handleToggleViewTransactions = async (address: string) => {
+    if (expandedAddress === address) {
+      setExpandedAddress(null);
+      return;
+    }
+    setExpandedAddress(address);
+    if (!addressTxs[address]) {
+      setLoadingAddressTxs((prev) => ({ ...prev, [address]: true }));
+      try {
+        const txs = await fetchRealAddressTransactions(address, market.currentBlock || 884120);
+        setAddressTxs((prev) => ({ ...prev, [address]: txs }));
+      } catch (e) {
+        console.error('Failed to fetch transactions for address:', address, e);
+        setAddressTxs((prev) => ({ ...prev, [address]: [] }));
+      } finally {
+        setLoadingAddressTxs((prev) => ({ ...prev, [address]: false }));
+      }
+    }
   };
 
   useEffect(() => {
@@ -111,6 +153,8 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
       setInputKey('');
       setPassphraseInput('');
       setScanResult(null);
+      setExpandedAddress(null);
+      setAddressTxs({});
     }
   }, [isOpen, initialKey]);
 
@@ -135,8 +179,8 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
     if (!check.isValid) {
       setErrorMsg(
         lang === 'th'
-          ? 'รูปแบบกุญแจไม่ถูกต้อง กรุณาใช้ WIF (K/L/5...), 64-Hex, หรือ Seed 12/24 คำ'
-          : 'Invalid key format. Supported: WIF (K/L/5...), 64-Hex, or 12/24 BIP39 Seed'
+          ? 'รูปแบบกุญแจไม่ถูกต้อง กรุณาใช้ WIF (K/L/5...), 64-Hex, Master Key (xprv, zprv, yprv) หรือ Seed 12/24 คำ'
+          : 'Invalid key format. Supported: WIF (K/L/5...), 64-Hex, Master Key (xprv, zprv, yprv), or 12/24 BIP39 Seed'
       );
       return;
     }
@@ -287,7 +331,7 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-                <span>{lang === 'th' ? 'ระบุ Private Key หรือ Seed Phrase' : 'Enter Private Key or Seed Phrase'}</span>
+                <span>{lang === 'th' ? 'ระบุ Private Key, Master Key (xprv) หรือ Seed Phrase' : 'Enter Private Key, Master Key (xprv) or Seed Phrase'}</span>
                 {keyDetection.isValid && (
                   <span className="px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-300 text-[10px] font-mono border border-cyan-500/30">
                     {keyDetection.label}
@@ -341,8 +385,8 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
                 spellCheck="false"
                 placeholder={
                   lang === 'th'
-                    ? 'วาง WIF Key (K... / 5...), 64-Hex Key, Casascius Mini-Key, หรือ Seed 12/24 คำ...'
-                    : 'Paste WIF key (K... / 5...), 64-Hex key, Casascius Mini-Key, or 12/24 words...'
+                    ? 'วาง WIF Key (K... / 5...), 64-Hex, Master Key (xprv..., zprv..., yprv...) หรือ Seed 12/24 คำ...'
+                    : 'Paste WIF key (K... / 5...), 64-Hex, Master Key (xprv, zprv, yprv), or 12/24 words...'
                 }
                 className={`w-full px-3.5 py-2.5 rounded-2xl bg-slate-950 border text-xs font-mono transition-all outline-none resize-none ${
                   showKey ? 'text-slate-100' : 'text-transparent'
@@ -417,7 +461,7 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
               {isScanning ? (
                 <>
                   <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                  <span>{lang === 'th' ? 'กำลังสแกนบล็อกเชนสด (Scanning Blockchains...)' : 'Scanning Mainnet Nodes...'}</span>
+                  <span>{lang === 'th' ? 'กำลังสแกนบล็อกเชนสด (Scanning Blockchains...)' : 'Scanning Bitcoin Nodes...'}</span>
                 </>
               ) : (
                 <>
@@ -499,6 +543,21 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
                     <div className="text-[10px] text-slate-500">{lang === 'th' ? 'คำนวณตามราคาตลาดสด' : 'Live Index Price'}</div>
                   </div>
                 </div>
+
+                {/* Import to Zero-Exposure Vault Shortcut Button */}
+                {onSelectKeyForImport && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onSelectKeyForImport(scanResult.rawSecret);
+                      onClose();
+                    }}
+                    className="w-full mt-3 py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold flex items-center justify-center gap-2 transition-all active:scale-98"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-amber-400" />
+                    <span>{lang === 'th' ? 'นำเข้า Private Key นี้เป็นกระเป๋าถาวรใน Vault' : 'Import this Key into Zero-Exposure Vault'}</span>
+                  </button>
+                )}
               </div>
 
               {/* Sub-Navigation Switcher */}
@@ -628,8 +687,170 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
                         <span>Path: <span className="font-mono text-slate-300">{addrInfo.derivationPath}</span></span>
                         <span>UTXOs: <span className="font-mono text-slate-300">{addrInfo.utxoCount}</span> | Txs: <span className="font-mono text-slate-300">{addrInfo.txCount}</span></span>
                       </div>
+
+                      {/* View Transactions Toggle Button */}
+                      <div className="mt-2 pt-1.5 border-t border-slate-900 flex items-center justify-between">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleViewTransactions(addrInfo.address)}
+                          className="text-[11px] font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1.5 transition-colors py-0.5"
+                        >
+                          {expandedAddress === addrInfo.address ? (
+                            <>
+                              <ChevronUp className="w-3.5 h-3.5" />
+                              <span>{lang === 'th' ? 'ซ่อนรายการธุรกรรม' : 'Hide Transactions'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="w-3.5 h-3.5" />
+                              <span>
+                                {lang === 'th'
+                                  ? `ดูรายการธุรกรรมสด (${addrInfo.txCount} รายการ)`
+                                  : `View On-Chain Transactions (${addrInfo.txCount})`}
+                              </span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Expandable Transaction History List */}
+                      {expandedAddress === addrInfo.address && (
+                        <div className="mt-2.5 p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2 animate-in fade-in duration-200">
+                          <div className="flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            <span>{lang === 'th' ? 'ประวัติธุรกรรมบล็อกเชนสด' : 'Live On-Chain History'}</span>
+                            <span className="font-mono text-[9px] text-slate-500">Mempool & Blockstream Nodes</span>
+                          </div>
+
+                          {loadingAddressTxs[addrInfo.address] ? (
+                            <div className="py-4 flex items-center justify-center gap-2 text-xs text-amber-400">
+                              <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                              <span>{lang === 'th' ? 'กำลังดึงข้อมูลธุรกรรมจากบล็อกเชน...' : 'Fetching on-chain transactions...'}</span>
+                            </div>
+                          ) : (addressTxs[addrInfo.address]?.length || 0) > 0 ? (
+                            <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                              {addressTxs[addrInfo.address].map((tx) => (
+                                <div
+                                  key={tx.id}
+                                  className="p-2 rounded-lg bg-slate-950/80 border border-slate-800/80 flex items-center justify-between gap-2 text-xs"
+                                >
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <div
+                                      className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                                        tx.type === 'received'
+                                          ? 'bg-emerald-500/20 text-emerald-400'
+                                          : 'bg-rose-500/20 text-rose-400'
+                                      }`}
+                                    >
+                                      {tx.type === 'received' ? (
+                                        <ArrowDownLeft className="w-3.5 h-3.5" />
+                                      ) : (
+                                        <ArrowUpRight className="w-3.5 h-3.5" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-mono text-[10px] text-slate-300 truncate">
+                                          {tx.txid.slice(0, 10)}...{tx.txid.slice(-6)}
+                                        </span>
+                                        <a
+                                          href={`https://mempool.space/tx/${tx.txid}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="text-slate-400 hover:text-amber-400 transition-colors"
+                                          title="View on Mempool.space"
+                                        >
+                                          <ExternalLink className="w-3 h-3" />
+                                        </a>
+                                      </div>
+                                      <div className="text-[9px] text-slate-500 flex items-center gap-1">
+                                        <span>{new Date(tx.timestamp).toLocaleDateString()}</span>
+                                        <span>•</span>
+                                        <span className={tx.status === 'completed' ? 'text-emerald-400' : 'text-amber-400'}>
+                                          {tx.status === 'completed'
+                                            ? `${tx.confirmations} confs`
+                                            : (lang === 'th' ? 'รอยืนยันใน Mempool' : 'Unconfirmed')}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="text-right shrink-0">
+                                    <div
+                                      className={`font-mono font-bold text-xs ${
+                                        tx.type === 'received' ? 'text-emerald-400' : 'text-rose-400'
+                                      }`}
+                                    >
+                                      {tx.type === 'received' ? '+' : '-'}{tx.amountBtc.toFixed(8)} BTC
+                                    </div>
+                                    <div className="text-[9px] text-slate-500 font-mono">
+                                      {tx.amountSats.toLocaleString()} sats
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="py-2.5 text-center text-xs text-slate-500 bg-slate-950/40 rounded-lg">
+                              {lang === 'th'
+                                ? 'ไม่พบรายการธุรกรรมบนที่อยู่นี้ (0 Transactions)'
+                                : 'No recorded transactions on this address (0 Txs)'}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {addrInfo.balanceSats > 0 && (
+                        <div className="mt-2.5 p-2 rounded-xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-between text-xs">
+                          <span className="text-amber-300 font-bold flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                            {lang === 'th' ? 'พบยอดเงินสดพร้อมกวาดเข้า Vault!' : 'Confirmed Balance Available!'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveSubTab('sweep')}
+                            className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] transition-all"
+                          >
+                            {lang === 'th' ? 'ไปที่แท็บกวาดเหรียญ' : 'Go to Sweep'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
+
+                  {scanResult.totalBtcSats === 0 && (
+                    <div className="mt-4 p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                      <div className="text-xs font-bold text-slate-300 flex items-center gap-2">
+                        <HelpCircle className="w-4 h-4 text-amber-400" />
+                        <span>{lang === 'th' ? 'ทำไมใส่ Private Key แล้วไม่พบเหรียญหรือธุรกรรม?' : 'Why is the balance or transaction count 0?'}</span>
+                      </div>
+                      <ul className="text-[11px] text-slate-400 space-y-1.5 list-disc list-inside leading-relaxed">
+                        <li>
+                          <strong>{lang === 'th' ? 'รูปแบบแอดเดรสต่างกัน:' : 'Address Format:'}</strong>{' '}
+                          {lang === 'th'
+                            ? 'เหรียญเดิมอาจอยู่ที่ Legacy Uncompressed (1...), Legacy Compressed (1...), Nested SegWit (3...) หรือ Native SegWit (bc1q...) โปรดตรวจสอบทั้ง 5 แถวด้านบน'
+                            : 'Funds might reside on Legacy Uncompressed (1...), Legacy Compressed (1...), Nested SegWit (3...), or Native SegWit (bc1q...).'}
+                        </li>
+                        <li>
+                          <strong>{lang === 'th' ? 'เหรียญถูกโอนออกไปแล้ว:' : 'Transferred Out:'}</strong>{' '}
+                          {lang === 'th'
+                            ? 'หากยอดคงเหลือ 0 BTC แต่มี Txs > 0 แสดงว่าเคยมีเหรียญและถูกโอนออกไปแล้ว สามารถกดไอคอน 🔗 เพื่อดูประวัติบน Mempool.space'
+                            : 'If Txs > 0 with 0 balance, funds were transferred out previously. Click the 🔗 icon to inspect on Mempool.space.'}
+                        </li>
+                        <li>
+                          <strong>{lang === 'th' ? 'เหรียญแยกสาขา (Hard Forks):' : 'Hard Fork Coins:'}</strong>{' '}
+                          {lang === 'th'
+                            ? 'หากกุญแจนี้มีมาก่อนปี 2017 คุณอาจมีสิทธิ์รับ Bitcoin Cash (BCH), Bitcoin SV (BSV) หรือ BTG กดดูที่แท็บ "Hard Forks"'
+                            : 'If your key predates 2017, you may be eligible to claim BCH, BSV, BTG, or XEC in the "Hard Forks" tab.'}
+                        </li>
+                        <li>
+                          <strong>{lang === 'th' ? 'คำที่ 25 (BIP-39 Passphrase):' : 'Passphrase:'}</strong>{' '}
+                          {lang === 'th'
+                            ? 'หากกุญแจเดิมมาจากกระเป๋าที่มีการตั้งรหัสผ่านเสริม (25th Word) ต้องระบุในช่องด้านบนให้ตรงกัน'
+                            : 'If the wallet was protected by a BIP-39 passphrase, enter the 25th word in the field above.'}
+                        </li>
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -810,7 +1031,7 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
                       <strong className="text-slate-200">1. Replay Protection:</strong>{' '}
                       {lang === 'th'
                         ? 'เหรียญ Hard Fork เช่น BCH และ BTG มีการใส่ SIGHASH_FORKID ป้องกันไม่ให้การโอนบนเหรียญหนึ่งไปกระทบยอดบนบิตคอยน์จริง (BTC)'
-                        : 'Hard Fork coins like BCH & BTG implement SIGHASH_FORKID, preventing transactions from being replayed on Bitcoin Mainnet.'}
+                        : 'Hard Fork coins like BCH & BTG implement SIGHASH_FORKID, preventing transactions from being replayed on Bitcoin.'}
                     </p>
                     <p>
                       <strong className="text-slate-200">2. Best Practice (ลำดับที่ถูกต้อง):</strong>{' '}

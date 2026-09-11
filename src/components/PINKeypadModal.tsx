@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Lock, Delete, ShieldAlert, CheckCircle2, Eye, EyeOff, Info, RotateCcw } from 'lucide-react';
 import { Language } from '../types/wallet';
 import { i18n } from '../utils/i18n';
+import { triggerHaptic } from '../utils/haptics';
 
 interface PINKeypadModalProps {
   isOpen: boolean;
@@ -75,6 +76,7 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
   if (!isOpen) return null;
 
   const handleKeyPress = (num: number) => {
+    triggerHaptic('light');
     setError(null);
     if (step === 'enter_old') {
       if (pin.length < 6) {
@@ -83,12 +85,14 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
         if (nextPin.length === 6) {
           const isOldValid = !storedPinHash || btoa(nextPin) === storedPinHash;
           if (isOldValid) {
+            triggerHaptic('success');
             setTimeout(() => {
               setPin('');
               setStep('create');
               setError(null);
             }, 150);
           } else {
+            triggerHaptic('error');
             setError(t.enterOldPinError);
             setPin('');
           }
@@ -107,6 +111,7 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
         const nextPin = pin + num.toString();
         setPin(nextPin);
         if (nextPin.length === 6) {
+          triggerHaptic('medium');
           setTimeout(() => {
             setConfirmPin('');
             setStep('confirm');
@@ -123,17 +128,21 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
               // Check if decoy PIN is identical to main PIN
               const isMainPin = !!storedPinHash && btoa(nextConfirm) === storedPinHash;
               if (isMainPin) {
+                triggerHaptic('error');
                 setError(t.decoyPinSameAsMainError);
                 setPin('');
                 setConfirmPin('');
                 setStep('create');
                 return;
               }
+              triggerHaptic('success');
               onSuccess(nextConfirm, true);
             } else {
+              triggerHaptic('success');
               onSuccess(nextConfirm, false);
             }
           } else {
+            triggerHaptic('error');
             setError(lang === 'th' ? 'รหัส PIN ไม่ตรงกัน กรุณาตั้งใหม่' : 'PINs do not match. Try again.');
             setPin('');
             setConfirmPin('');
@@ -150,6 +159,7 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
 
   const validateEnteredPin = (enteredPin: string) => {
     if (!storedPinHash) {
+      triggerHaptic('success');
       onSuccess(enteredPin, false);
       return;
     }
@@ -159,16 +169,20 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
     const isDuressValid = !!duressPinHash && enteredHash === duressPinHash;
 
     if (isDuressValid) {
+      triggerHaptic('success');
       onSuccess(enteredPin, true);
     } else if (isPrimaryValid) {
+      triggerHaptic('success');
       onSuccess(enteredPin, false);
     } else {
+      triggerHaptic('error');
       setError(t.pinErrorMsg);
       setPin('');
     }
   };
 
   const handleDelete = () => {
+    triggerHaptic('light');
     setError(null);
     if (step === 'confirm') {
       setConfirmPin(prev => prev.slice(0, -1));

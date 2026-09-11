@@ -73,6 +73,7 @@ export const WalletManagerModal: React.FC<WalletManagerModalProps> = ({
         <div className="space-y-2.5 overflow-y-auto pr-1 flex-1 mb-4">
           {accounts.map((acc) => {
             const isActive = acc.id === activeAccountId;
+            const isMaster = acc.keySource === 'master_private_key';
             const isKey = acc.keySource === 'private_key';
 
             return (
@@ -92,7 +93,7 @@ export const WalletManagerModal: React.FC<WalletManagerModalProps> = ({
                   <div className="flex items-center gap-2">
                     <div
                       className="w-3 h-3 rounded-full shrink-0"
-                      style={{ backgroundColor: acc.color || (isKey ? '#a855f7' : '#f59e0b') }}
+                      style={{ backgroundColor: acc.color || (isMaster ? '#06b6d4' : isKey ? '#a855f7' : '#f59e0b') }}
                     />
                     <span className="font-bold text-xs text-slate-100">
                       {acc.name}
@@ -117,13 +118,15 @@ export const WalletManagerModal: React.FC<WalletManagerModalProps> = ({
                     )}
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-medium flex items-center gap-1 border ${
-                        isKey
+                        isMaster
+                          ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                          : isKey
                           ? 'bg-purple-500/15 text-purple-300 border-purple-500/30'
                           : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                       }`}
                     >
-                      {isKey ? <Key className="w-3 h-3" /> : <Layers className="w-3 h-3" />}
-                      <span>{isKey ? 'Private Key' : 'Seed Phrase'}</span>
+                      {isMaster ? <Sparkles className="w-3 h-3 text-cyan-400" /> : isKey ? <Key className="w-3 h-3" /> : <Layers className="w-3 h-3" />}
+                      <span>{isMaster ? 'Master Key' : isKey ? 'Private Key' : 'Seed Phrase'}</span>
                     </span>
                   </div>
                 </div>

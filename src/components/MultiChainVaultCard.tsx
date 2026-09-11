@@ -41,7 +41,7 @@ export const MultiChainVaultCard: React.FC<MultiChainVaultCardProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [copiedChain, setCopiedChain] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<'all' | 'evm' | 'l1' | 'utxo'>('all');
+  const [selectedCategory, setSelectedCategory] = useState<'all' | 'btc' | 'forks'>('all');
   const [activeChainDetail, setActiveChainDetail] = useState<DerivedChainAccount | null>(null);
 
   useEffect(() => {
@@ -77,14 +77,11 @@ export const MultiChainVaultCard: React.FC<MultiChainVaultCardProps> = ({
                           c.address.toLowerCase().includes(searchQuery.toLowerCase());
     if (!matchesSearch) return false;
 
-    if (selectedCategory === 'evm') {
-      return ['ETH', 'BNB', 'AVAX', 'POL'].includes(c.chainId);
+    if (selectedCategory === 'btc') {
+      return c.chainId === 'BTC';
     }
-    if (selectedCategory === 'utxo') {
-      return ['BTC', 'LTC', 'DOGE', 'BCH'].includes(c.chainId);
-    }
-    if (selectedCategory === 'l1') {
-      return ['SOL', 'TRX', 'BTC', 'ETH'].includes(c.chainId);
+    if (selectedCategory === 'forks') {
+      return c.chainId !== 'BTC';
     }
     return true;
   });
@@ -94,20 +91,20 @@ export const MultiChainVaultCard: React.FC<MultiChainVaultCardProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between gap-2.5">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-indigo-500 to-purple-600 flex items-center justify-center text-slate-950 shadow-md shadow-indigo-500/20 shrink-0">
+          <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center text-slate-950 shadow-md shadow-amber-500/20 shrink-0">
             <Layers className="w-4 h-4 sm:w-5 sm:h-5 text-slate-950" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <h3 className="text-xs sm:text-sm font-bold text-slate-50 truncate">
-                {lang === 'th' ? 'กระเป๋า Multi-Chain หลักทั้งหมด' : 'All Major Multi-Chain Vaults'}
+                {lang === 'th' ? 'แอดเดรสบิตคอยน์ & เหรียญแยกสาขา' : 'Bitcoin & Hard Fork Vault Addresses'}
               </h3>
-              <span className="px-1.5 py-0.2 rounded-full bg-indigo-500/20 text-indigo-300 font-mono text-[9px] font-bold border border-indigo-500/30 shrink-0">
-                {SUPPORTED_MULTI_CHAINS.length} Chains
+              <span className="px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[9px] font-bold border border-amber-500/30 shrink-0">
+                {SUPPORTED_MULTI_CHAINS.length} Coins
               </span>
             </div>
             <p className="text-[10px] text-slate-400 truncate">
-              {lang === 'th' ? 'BTC, ETH, SOL, BNB, TRX, DOGE, LTC, BCH, AVAX, POL' : 'Native support for top Layer 1 & EVM Blockchains'}
+              {lang === 'th' ? 'BTC, BCH, BSV, BTG, XEC (BIP-44/84 Deterministic Keys)' : 'Native support for Bitcoin & Hard Fork blockchains'}
             </p>
           </div>
         </div>
@@ -117,7 +114,7 @@ export const MultiChainVaultCard: React.FC<MultiChainVaultCardProps> = ({
           onClick={() => onNavigateTab('receive')}
           className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-200 text-[11px] font-bold transition-all border border-slate-700/80 flex items-center gap-1 shrink-0 active:scale-95"
         >
-          <QrCode className="w-3.5 h-3.5 text-indigo-400" />
+          <QrCode className="w-3.5 h-3.5 text-amber-400" />
           <span>{lang === 'th' ? 'รับเหรียญ' : 'Receive'}</span>
         </button>
       </div>
@@ -125,18 +122,22 @@ export const MultiChainVaultCard: React.FC<MultiChainVaultCardProps> = ({
       {/* Category Pills & Search */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
         <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
-          {(['all', 'evm', 'l1', 'utxo'] as const).map((cat) => (
+          {(['all', 'btc', 'forks'] as const).map((cat) => (
             <button
               key={cat}
               type="button"
               onClick={() => setSelectedCategory(cat)}
               className={`px-2.5 py-1 rounded-xl font-bold transition-all shrink-0 uppercase tracking-wider text-[9.5px] ${
                 selectedCategory === cat
-                  ? 'bg-indigo-500 text-slate-950 shadow-sm'
+                  ? 'bg-amber-500 text-slate-950 shadow-sm'
                   : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
               }`}
             >
-              {cat === 'all' ? (lang === 'th' ? 'ทั้งหมด' : 'All') : cat}
+              {cat === 'all'
+                ? (lang === 'th' ? 'ทั้งหมด' : 'All')
+                : cat === 'btc'
+                ? 'Bitcoin'
+                : (lang === 'th' ? 'เหรียญแยกสาขา' : 'Forks')}
             </button>
           ))}
         </div>
@@ -156,8 +157,8 @@ export const MultiChainVaultCard: React.FC<MultiChainVaultCardProps> = ({
       {/* Chain List Cards */}
       {loading ? (
         <div className="p-8 text-center text-xs text-slate-400 space-y-2">
-          <RefreshCw className="w-5 h-5 animate-spin mx-auto text-indigo-400" />
-          <p>{lang === 'th' ? 'กำลังคำนวณที่อยู่ทุกเครือข่ายตามมาตรฐาน BIP-44/84...' : 'Deriving multi-chain keys via BIP-44/84...'}</p>
+          <RefreshCw className="w-5 h-5 animate-spin mx-auto text-amber-400" />
+          <p>{lang === 'th' ? 'กำลังคำนวณที่อยู่กระเป๋าบิตคอยน์และเหรียญแยกสาขาตามมาตรฐาน BIP-44/84...' : 'Deriving Bitcoin & fork keys via BIP-44/84...'}</p>
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-2">

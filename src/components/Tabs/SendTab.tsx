@@ -28,6 +28,132 @@ import { btcToSats, formatBtc, formatFiat, formatSats, satsToBtc } from '../../u
 import { createPSBTPayload, validateBitcoinAddress, validateForkAddress } from '../../utils/cryptoVault';
 import { SUPPORTED_MULTI_CHAINS, ChainId, ChainConfig } from '../../types/multiChain';
 import { validateMultiChainAddress } from '../../utils/multiChainVault';
+import { deriveAllBtcVariantsFromSecret, AllBtcAddressFormats } from '../../utils/bitcoinKeyEngine';
+
+interface AddressInspection {
+  formatName: string;
+  standards: string;
+  scriptType: string;
+  efficiency: string;
+  vBytes: number;
+  badgeClass: string;
+  details: string;
+}
+
+function inspectAddress(chainId: ChainId, address: string, lang: Language): AddressInspection | null {
+  const clean = address.trim();
+  if (!clean) return null;
+
+  if (chainId === 'BTC') {
+    if (clean.startsWith('bc1p') || (clean.startsWith('bc1') && clean.length === 62)) {
+      return {
+        formatName: 'Taproot (P2TR)',
+        standards: 'BIP-86 / Bech32m',
+        scriptType: 'Pay-to-Taproot (Schnorr)',
+        efficiency: lang === 'th' ? 'ประหยัดค่าธรรมเนียมสูง (~35%) + ความเป็นส่วนตัวสูงสุด' : 'High Fee Savings (~35%) + Top Privacy',
+        vBytes: 154,
+        badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+        details: lang === 'th' ? 'รองรับ Schnorr Signature และเงื่อนไขธุรกรรมซับซ้อน' : 'Supports Schnorr Signatures & complex spending conditions'
+      };
+    }
+    if (clean.startsWith('bc1q')) {
+      return {
+        formatName: 'Native SegWit (P2WPKH)',
+        standards: 'BIP-84 / Bech32',
+        scriptType: 'Pay-to-Witness-Public-Key-Hash',
+        efficiency: lang === 'th' ? 'ค่าธรรมเนียมต่ำที่สุด (~38-42% ถูกกว่า Legacy)' : 'Lowest Fee (~38-42% cheaper than Legacy)',
+        vBytes: 140,
+        badgeClass: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
+        details: lang === 'th' ? 'มาตรฐานยอดนิยมสำหรับกระเป๋าและ Exchange ยุคใหม่' : 'Standard modern format for leading wallets & exchanges'
+      };
+    }
+    if (clean.startsWith('3')) {
+      return {
+        formatName: 'Nested SegWit (P2SH-P2WPKH)',
+        standards: 'BIP-49 / Base58',
+        scriptType: 'Pay-to-Script-Hash wrapper',
+        efficiency: lang === 'th' ? 'ประหยัดปานกลาง (~25% ถูกกว่า Legacy)' : 'Moderate Savings (~25% cheaper than Legacy)',
+        vBytes: 166,
+        badgeClass: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+        details: lang === 'th' ? 'ทำงานร่วมกับระบบเก่าที่ไม่รองรับ bech32 ได้ 100%' : '100% backward-compatible with older services'
+      };
+    }
+    if (clean.startsWith('1')) {
+      return {
+        formatName: 'Legacy (P2PKH)',
+        standards: 'BIP-44 / Base58',
+        scriptType: 'Pay-to-Public-Key-Hash',
+        efficiency: lang === 'th' ? 'ขนาดธุรกรรมใหญ่ที่สุด (ค่าธรรมเนียมมาตรฐานเดิม)' : 'Largest tx size (Standard Legacy Fee rate)',
+        vBytes: 192,
+        badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+        details: lang === 'th' ? 'รูปแบบดั้งเดิมตั้งแต่ปี 2009 ความเข้ากันได้สูงสุด' : 'Original format since 2009, universal compatibility'
+      };
+    }
+  }
+
+  if (chainId === 'BCH') {
+    if (clean.startsWith('bitcoincash:q') || clean.startsWith('q')) {
+      return {
+        formatName: 'CashAddr Format',
+        standards: 'BIP-CashAddr',
+        scriptType: 'Native CashAddr',
+        efficiency: lang === 'th' ? 'ค่าธรรมเนียมเครือข่าย BCH ต่ำมาก (< 0.0001 BCH)' : 'Ultra-low BCH network fee (< 0.0001 BCH)',
+        vBytes: 160,
+        badgeClass: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+        details: lang === 'th' ? 'ป้องกันการโอนข้ามสาย BTC ผิดพลาด' : 'Prevents accidental transfers to BTC network'
+      };
+    }
+    if (clean.startsWith('1')) {
+      return {
+        formatName: 'Legacy BCH Address',
+        standards: 'Base58 Legacy',
+        scriptType: 'P2PKH Legacy BCH',
+        efficiency: lang === 'th' ? 'ค่าธรรมเนียมต่ำ' : 'Standard Low Fee',
+        vBytes: 192,
+        badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+        details: lang === 'th' ? 'แอดเดรสรูปแบบเก่าของ Bitcoin Cash' : 'Legacy address format for Bitcoin Cash'
+      };
+    }
+  }
+
+  if (chainId === 'BSV') {
+    return {
+      formatName: 'Bitcoin SV Legacy (P2PKH)',
+      standards: 'Original Bitcoin Protocol',
+      scriptType: 'Pay-to-Public-Key-Hash',
+      efficiency: lang === 'th' ? 'ค่าขุดต่ำมาก (<0.5 Sat/vB)' : 'Ultra-low fee (<0.5 Sat/vB)',
+      vBytes: 192,
+      badgeClass: 'bg-yellow-500/15 text-yellow-300 border-yellow-500/30',
+      details: lang === 'th' ? 'แอดเดรสรูปแบบ Legacy ของ Bitcoin SV' : 'Legacy address format for Bitcoin SV',
+    };
+  }
+
+  if (chainId === 'BTG') {
+    return {
+      formatName: 'Bitcoin Gold (BTG)',
+      standards: 'Equihash PoW',
+      scriptType: 'P2PKH G-Prefix',
+      efficiency: lang === 'th' ? 'ค่าธรรมเนียมมาตรฐาน' : 'Standard fee',
+      vBytes: 192,
+      badgeClass: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+      details: lang === 'th' ? 'แอดเดรส Bitcoin Gold พร้อมป้องกัน Replay' : 'Bitcoin Gold address with replay protection',
+    };
+  }
+
+  if (chainId === 'XEC') {
+    return {
+      formatName: 'eCash CashAddr',
+      standards: 'CashAddr (ecash:)',
+      scriptType: 'P2PKH CashAddr',
+      efficiency: lang === 'th' ? 'ค่าธรรมเนียมต่ำมาก' : 'Micro-fee',
+      vBytes: 192,
+      badgeClass: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30',
+      details: lang === 'th' ? 'แอดเดรสมาตรฐาน eCash (อดีต BCH ABC)' : 'Standard eCash CashAddr format',
+    };
+  }
+
+  return null;
+}
 
 interface SendTabProps {
   account: WalletAccount;
@@ -37,6 +163,7 @@ interface SendTabProps {
   onOpenPinModal: (action: () => void) => void;
   onSendSuccess: (tx: Transaction) => void;
   onOpenLegacyScannerModal?: () => void;
+  onNavigateToAirGap?: () => void;
   security?: SecuritySettings;
   onUnfreeze?: () => void;
 }
@@ -49,6 +176,7 @@ export const SendTab: React.FC<SendTabProps> = ({
   onOpenPinModal,
   onSendSuccess,
   onOpenLegacyScannerModal,
+  onNavigateToAirGap,
   security,
   onUnfreeze,
 }) => {
@@ -139,6 +267,13 @@ export const SendTab: React.FC<SendTabProps> = ({
     }
   };
 
+  const userBtcVariants = React.useMemo(() => {
+    const secret = account.publicKey || account.address;
+    return deriveAllBtcVariantsFromSecret(secret);
+  }, [account.publicKey, account.address]);
+
+  const inspectedFormat = inspectAddress(selectedChainId, recipientAddress, lang);
+
   const getActiveFeeRate = (): number => {
     if (feeSpeed === 'low') return market.feeEstimates.low;
     if (feeSpeed === 'medium') return market.feeEstimates.medium;
@@ -150,26 +285,18 @@ export const SendTab: React.FC<SendTabProps> = ({
   const satVbRate = getActiveFeeRate();
   const getEstimatedFeeCoin = (): number => {
     switch (selectedChainId) {
-      case 'BTC':
-        return satsToBtc(140 * satVbRate);
-      case 'ETH':
-        return 0.0012; // ~21000 gas * 15 gwei
-      case 'SOL':
-        return 0.000005; // 5000 lamports
-      case 'BNB':
-        return 0.0003;
-      case 'TRX':
-        return 1.5; // bandwidth / energy
-      case 'DOGE':
-        return 0.5;
-      case 'LTC':
-        return 0.0005;
+      case 'BTC': {
+        const vBytes = inspectedFormat?.vBytes || 140;
+        return satsToBtc(vBytes * satVbRate);
+      }
       case 'BCH':
-        return 0.0001;
-      case 'AVAX':
-        return 0.002;
-      case 'POL':
-        return 0.01;
+        return 0.00005; // 1-2 sat/byte
+      case 'BSV':
+        return 0.00002; // <1 sat/byte
+      case 'BTG':
+        return 0.0001; // standard BTG fee
+      case 'XEC':
+        return 5.46; // 5.46 XEC fee
       default:
         return 0.0001;
     }
@@ -272,6 +399,27 @@ export const SendTab: React.FC<SendTabProps> = ({
 
   return (
     <div className="space-y-3.5 pb-20 animate-in fade-in duration-300">
+      {/* Transact Mode Segmented Switcher */}
+      {onNavigateToAirGap && (
+        <div className="flex items-center p-1 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-inner">
+          <button
+            type="button"
+            className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20"
+          >
+            <Send className="w-3.5 h-3.5" />
+            <span>{lang === 'th' ? 'โอนเงิน (Send)' : 'Send BTC / Coins'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateToAirGap}
+            className="flex-1 py-2 px-3 rounded-xl text-slate-400 hover:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all hover:bg-slate-800/60"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+            <span>{lang === 'th' ? 'เซ็นออฟไลน์ (Air-Gap)' : 'Air-Gap Sign PSBT'}</span>
+          </button>
+        </div>
+      )}
+
       <div className="p-4 sm:p-5 rounded-3xl bg-slate-900 border border-slate-800/90 shadow-xl space-y-3.5">
         {/* Title Header */}
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
@@ -346,11 +494,11 @@ export const SendTab: React.FC<SendTabProps> = ({
         <div>
           <label className="text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
             <span className="flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-indigo-400" />
-              <span>{lang === 'th' ? 'เลือกเครือข่ายที่ต้องการโอน (Multi-Chain)' : 'Select Multi-Chain Network'}</span>
+              <Layers className="w-3.5 h-3.5 text-amber-400" />
+              <span>{lang === 'th' ? 'เลือกเหรียญ / เครือข่ายที่ต้องการโอน (Bitcoin & Forks)' : 'Select Asset Network (Bitcoin & Forks)'}</span>
             </span>
-            <span className="text-[10px] text-indigo-400 font-mono">
-              {SUPPORTED_MULTI_CHAINS.length} Chains
+            <span className="text-[10px] text-amber-400 font-mono">
+              {SUPPORTED_MULTI_CHAINS.length} Coins
             </span>
           </label>
           <div className="flex items-center gap-1 p-1 bg-slate-950 rounded-2xl border border-slate-800 overflow-x-auto scrollbar-none">
@@ -436,17 +584,15 @@ export const SendTab: React.FC<SendTabProps> = ({
               value={recipientAddress}
               onChange={(e) => handleAddressChange(e.target.value)}
               placeholder={
-                selectedChainId === 'ETH' || selectedChainId === 'BNB' || selectedChainId === 'AVAX' || selectedChainId === 'POL'
-                  ? '0x71C...3a9'
-                  : selectedChainId === 'SOL'
-                  ? '7xKXtg2CW87d97TXJSDpbD5jBkheTqA83TZRuJosgAsU'
-                  : selectedChainId === 'TRX'
-                  ? 'TXj3v8k32p9zx7m0al4a4c58qfwsy439'
-                  : selectedChainId === 'DOGE'
-                  ? 'DP3p5d72q9q29a4m27t4a4c58qfwsy43'
-                  : selectedChainId === 'LTC'
-                  ? 'ltc1q9v8k32p9zx7m0al4a4c58qfwsy439'
-                  : 'bc1q9v8k32p9zx7m0al4a4c58qfwsy439...'
+                selectedChainId === 'BTC'
+                  ? 'bc1q9v8k32p9zx7m0al4a4c58qfwsy439...'
+                  : selectedChainId === 'BCH'
+                  ? 'bitcoincash:qp3wjpa3tlyw22dfq5ngsvvs3wf...'
+                  : selectedChainId === 'BSV'
+                  ? '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa...'
+                  : selectedChainId === 'BTG'
+                  ? 'GeEa9sK7q1P7bK8x2L7... หรือ 1...'
+                  : 'ecash:qz5wjpa3tlyw22dfq5ngsvvs3wf...'
               }
               className={`w-full bg-slate-950 border rounded-2xl p-3 text-xs font-mono text-slate-100 placeholder-slate-600 focus:outline-none focus:ring-1 ${
                 addressValidation?.valid
@@ -468,6 +614,109 @@ export const SendTab: React.FC<SendTabProps> = ({
               <AlertTriangle className="w-3.5 h-3.5" />
               <span>{addressValidation.error}</span>
             </p>
+          )}
+
+          {/* Quick Format Options for BTC (Self-Transfer / Change / Consolidate) */}
+          {selectedChainId === 'BTC' && (
+            <div className="mt-2.5 space-y-1.5 bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800">
+              <div className="flex items-center justify-between">
+                <span className="text-[10.5px] text-slate-300 font-semibold flex items-center gap-1">
+                  <Layers className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{lang === 'th' ? 'โอนเข้าแอดเดรสของฉัน (รวม UTXO / สลับรูปแบบ):' : 'Self-Transfer / Change Format (Consolidation):'}</span>
+                </span>
+                <span className="text-[9.5px] text-slate-500 font-mono">4 Variants</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleAddressChange(userBtcVariants.nativeSegwit)}
+                  className={`px-2 py-1.5 rounded-xl text-[10.5px] font-mono border transition-all text-left truncate ${
+                    recipientAddress === userBtcVariants.nativeSegwit
+                      ? 'bg-indigo-500/20 border-indigo-500 text-indigo-300 font-bold shadow-sm'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                  title={`Native SegWit (P2WPKH): ${userBtcVariants.nativeSegwit}`}
+                >
+                  <span className="block font-sans font-bold text-[9.5px] text-indigo-400 truncate">Native SegWit</span>
+                  <span className="truncate block text-[9px]">{userBtcVariants.nativeSegwit.slice(0, 7)}...{userBtcVariants.nativeSegwit.slice(-4)}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddressChange(userBtcVariants.taproot)}
+                  className={`px-2 py-1.5 rounded-xl text-[10.5px] font-mono border transition-all text-left truncate ${
+                    recipientAddress === userBtcVariants.taproot
+                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 font-bold shadow-sm'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                  title={`Taproot (P2TR): ${userBtcVariants.taproot}`}
+                >
+                  <span className="block font-sans font-bold text-[9.5px] text-emerald-400 truncate">Taproot</span>
+                  <span className="truncate block text-[9px]">{userBtcVariants.taproot.slice(0, 7)}...{userBtcVariants.taproot.slice(-4)}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddressChange(userBtcVariants.nestedSegwit)}
+                  className={`px-2 py-1.5 rounded-xl text-[10.5px] font-mono border transition-all text-left truncate ${
+                    recipientAddress === userBtcVariants.nestedSegwit
+                      ? 'bg-sky-500/20 border-sky-500 text-sky-300 font-bold shadow-sm'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                  title={`Nested SegWit (P2SH): ${userBtcVariants.nestedSegwit}`}
+                >
+                  <span className="block font-sans font-bold text-[9.5px] text-sky-400 truncate">Nested SegWit</span>
+                  <span className="truncate block text-[9px]">{userBtcVariants.nestedSegwit.slice(0, 6)}...{userBtcVariants.nestedSegwit.slice(-4)}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleAddressChange(userBtcVariants.legacyCompressed)}
+                  className={`px-2 py-1.5 rounded-xl text-[10.5px] font-mono border transition-all text-left truncate ${
+                    recipientAddress === userBtcVariants.legacyCompressed
+                      ? 'bg-amber-500/20 border-amber-500 text-amber-300 font-bold shadow-sm'
+                      : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+                  }`}
+                  title={`Legacy (P2PKH): ${userBtcVariants.legacyCompressed}`}
+                >
+                  <span className="block font-sans font-bold text-[9.5px] text-amber-400 truncate">Legacy P2PKH</span>
+                  <span className="truncate block text-[9px]">{userBtcVariants.legacyCompressed.slice(0, 6)}...{userBtcVariants.legacyCompressed.slice(-4)}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Real-time Address Format Intelligence */}
+          {inspectedFormat && (
+            <div className="mt-2.5 p-2.5 rounded-2xl bg-slate-950/90 border border-slate-800 space-y-1.5 text-left text-xs animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>{lang === 'th' ? 'การวิเคราะห์แอดเดรสปลายทาง' : 'Destination Address Intelligence'}</span>
+                </span>
+                <span className={`px-2 py-0.5 rounded-lg border text-[10px] font-bold ${inspectedFormat.badgeClass}`}>
+                  {inspectedFormat.formatName}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px]">
+                <div className="bg-slate-900/70 p-1.5 rounded-xl border border-slate-800">
+                  <span className="text-slate-500 block text-[9px]">Standard & Script:</span>
+                  <span className="font-mono text-slate-300 font-semibold truncate block">{inspectedFormat.standards}</span>
+                </div>
+                <div className="bg-slate-900/70 p-1.5 rounded-xl border border-slate-800">
+                  <span className="text-slate-500 block text-[9px]">Tx Size / Size Weight:</span>
+                  <span className="font-mono text-amber-400 font-semibold truncate block">~{inspectedFormat.vBytes} vBytes</span>
+                </div>
+                <div className="col-span-2 sm:col-span-1 bg-slate-900/70 p-1.5 rounded-xl border border-slate-800">
+                  <span className="text-slate-500 block text-[9px]">Fee Efficiency:</span>
+                  <span className="text-emerald-400 font-semibold text-[9.5px] truncate block">{inspectedFormat.efficiency}</span>
+                </div>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-snug">
+                {inspectedFormat.details}
+              </p>
+            </div>
           )}
         </div>
 

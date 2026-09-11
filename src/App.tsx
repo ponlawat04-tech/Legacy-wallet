@@ -20,6 +20,8 @@ import { WalletReadinessModal } from './components/WalletReadinessModal';
 import { WalletManagerModal } from './components/WalletManagerModal';
 import { LegacyForkScannerModal } from './components/LegacyForkScannerModal';
 import { PrivateKeyQrScannerModal } from './components/PrivateKeyQrScannerModal';
+import { SpvNodeStatusModal } from './components/SpvNodeStatusModal';
+import { spvEngine } from './utils/spv/spvEngine';
 import { CheckCircle2, ShieldAlert, Lock, Wifi } from 'lucide-react';
 import { i18n } from './utils/i18n';
 
@@ -88,6 +90,21 @@ export default function App() {
     return (localStorage.getItem('COLDVAULT_CURRENCY_V1') as Currency) || 'THB';
   });
   const [airGapMode, setAirGapMode] = useState<boolean>(true);
+  const [isDeviceOnline, setIsDeviceOnline] = useState<boolean>(() =>
+    typeof navigator !== 'undefined' ? navigator.onLine : true
+  );
+
+  // Physical Device Online/Offline Hardware Link Detector
+  useEffect(() => {
+    const handleOnline = () => setIsDeviceOnline(true);
+    const handleOffline = () => setIsDeviceOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Security Settings (Persisted in localStorage)
   const [security, setSecurity] = useState<SecuritySettings>(() => {
@@ -135,6 +152,7 @@ export default function App() {
 
   const [isVaultModalOpen, setIsVaultModalOpen] = useState<boolean>(false);
   const [isReadinessModalOpen, setIsReadinessModalOpen] = useState<boolean>(false);
+  const [isSpvModalOpen, setIsSpvModalOpen] = useState<boolean>(false);
   const [isLegacyForkScannerOpen, setIsLegacyForkScannerOpen] = useState<boolean>(false);
   const [isPrivateKeyScannerOpen, setIsPrivateKeyScannerOpen] = useState<boolean>(false);
   const [qrScannedKeyForSweep, setQrScannedKeyForSweep] = useState<string>('');
@@ -198,6 +216,26 @@ export default function App() {
     }
   }, [realTransactions]);
 
+  // Initial SPV (bitcoinj) verification of loaded transactions
+  useEffect(() => {
+    if (realTransactions.length > 0) {
+      spvEngine.verifyTransactions(realTransactions).then((verified) => {
+        const hasUnverified = realTransactions.some((tx) => !tx.spvVerified);
+        if (hasUnverified) {
+          setRealTransactions(verified);
+          setTransactions(verified);
+        }
+      });
+    }
+  }, []);
+
+  // Synchronize active wallet account with SPV Wallet component for Bloom filtering
+  useEffect(() => {
+    if (account) {
+      spvEngine.updateWalletAccount(account);
+    }
+  }, [account]);
+
   useEffect(() => {
     localStorage.setItem('COLDVAULT_LANG_V1', lang);
   }, [lang]);
@@ -233,6 +271,9 @@ export default function App() {
 
       const onChainTxs = await fetchRealAddressTransactions(acc.address, marketData.currentBlock || 884120);
 
+      // Bitcoin SPV Engine (bitcoinj): Cryptographic Merkle inclusion verification
+      const verifiedTxs = await spvEngine.verifyTransactions(onChainTxs);
+
       const updatedAccount: WalletAccount = {
         ...acc,
         balanceBtc: onChainData.balanceBtc,
@@ -242,9 +283,9 @@ export default function App() {
       setAccount(updatedAccount);
       if (!security.duressActive) {
         setRealAccount(updatedAccount);
-        setRealTransactions(onChainTxs);
+        setRealTransactions(verifiedTxs);
       }
-      setTransactions(onChainTxs);
+      setTransactions(verifiedTxs);
 
       if (notify) {
         if (onChainData.balanceBtc > 0 || onChainTxs.length > 0) {
@@ -257,8 +298,8 @@ export default function App() {
         } else {
           showToast(
             lang === 'th'
-              ? `ซิงค์บล็อกเชนสำเร็จ: ยอดจริงบน Mainnet 0.00 BTC (0 ธุรกรรม)`
-              : `Blockchain sync complete: 0.00 BTC on Mainnet (0 txs)`,
+              ? `ซิงค์บล็อกเชนสำเร็จ: ยอดจริงบน Bitcoin 0.00 BTC (0 ธุรกรรม)`
+              : `Blockchain sync complete: 0.00 BTC on Bitcoin (0 txs)`,
             'info'
           );
         }
@@ -311,6 +352,43 @@ export default function App() {
       isMounted = false;
     };
   }, [airGapMode, realAccount, security.blockBackgroundSync, syncBlockchainData]);
+
+  // Background Execution Termination & Inactivity Auto-Lock Security Engine
+  useEffect(() => {
+    // 1. App Visibility & Window Blur (Freeze background tasks & lock immediately)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        if (security.pinEnabled) {
+          setIsAppLocked(true);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    // 2. Inactivity Auto-Lock Timer (Reset on touch, click, key, or scroll)
+    let inactivityTimer: any = null;
+    const timeoutMs = (security.autoLockDelayMinutes || 5) * 60 * 1000;
+
+    const resetInactivityTimer = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      if (!isAppLocked && security.pinEnabled) {
+        inactivityTimer = setTimeout(() => {
+          setIsAppLocked(true);
+        }, timeoutMs);
+      }
+    };
+
+    const activityEvents = ['mousedown', 'mousemove', 'keydown', 'touchstart', 'scroll'];
+    activityEvents.forEach((evt) => window.addEventListener(evt, resetInactivityTimer, { passive: true }));
+    resetInactivityTimer();
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      activityEvents.forEach((evt) => window.removeEventListener(evt, resetInactivityTimer));
+    };
+  }, [isAppLocked, security.pinEnabled, security.autoLockDelayMinutes]);
 
   const handleResetAndCreateNewVault = () => {
     try {
@@ -498,8 +576,20 @@ export default function App() {
     setActiveTab('home');
     showToast(
       lang === 'th' 
-        ? `ซีลกระเป๋า "${freshAccount.name}" สำเร็จ! (${freshAccount.keySource === 'private_key' ? 'Private Key' : 'Seed Phrase'})` 
-        : `Vault "${freshAccount.name}" sealed! (${freshAccount.keySource === 'private_key' ? 'Private Key' : 'Seed Phrase'})`, 
+        ? `ซีลกระเป๋า "${freshAccount.name}" สำเร็จ! (${
+            freshAccount.keySource === 'master_private_key'
+              ? 'Master Key (xprv)'
+              : freshAccount.keySource === 'private_key'
+              ? 'Private Key'
+              : 'Seed Phrase'
+          })` 
+        : `Vault "${freshAccount.name}" sealed! (${
+            freshAccount.keySource === 'master_private_key'
+              ? 'Master Key (xprv)'
+              : freshAccount.keySource === 'private_key'
+              ? 'Private Key'
+              : 'Seed Phrase'
+          })`, 
       'success'
     );
 
@@ -712,6 +802,7 @@ export default function App() {
           }}
           onOpenWalletManager={() => setIsWalletManagerOpen(true)}
           onOpenQrScanner={() => setIsPrivateKeyScannerOpen(true)}
+          onOpenSpvModal={() => setIsSpvModalOpen(true)}
           onLockApp={() => setIsAppLocked(true)}
           vaultFrozen={security.vaultFrozen}
           onToggleFreeze={() => {
@@ -751,6 +842,7 @@ export default function App() {
               }}
               onOpenQrScanner={() => setIsPrivateKeyScannerOpen(true)}
               onOpenReadinessModal={() => setIsReadinessModalOpen(true)}
+              onOpenSpvModal={() => setIsSpvModalOpen(true)}
               onSelectTxDetail={setSelectedTxDetail}
               onSyncBlockchain={() => syncBlockchainData(account, true)}
               isSyncing={isSyncingBlockchain}
@@ -773,6 +865,7 @@ export default function App() {
               currency={currency}
               lang={lang}
               onRefreshMarket={handleRefreshMarket}
+              onNavigateToHistory={() => setActiveTab('history')}
             />
           )}
 
@@ -785,6 +878,7 @@ export default function App() {
               onOpenPinModal={triggerPinProtection}
               onSendSuccess={handleSendSuccess}
               onOpenLegacyScannerModal={() => setIsLegacyForkScannerOpen(true)}
+              onNavigateToAirGap={() => setActiveTab('airgap')}
               security={security}
               onUnfreeze={() => {
                 triggerPinProtection(() => {
@@ -816,6 +910,7 @@ export default function App() {
               lang={lang}
               onOpenPinModal={triggerPinProtection}
               onSendSuccess={handleSendSuccess}
+              onNavigateToSend={() => setActiveTab('send')}
               security={security}
               onUnfreeze={() => {
                 triggerPinProtection(() => {
@@ -835,6 +930,7 @@ export default function App() {
               lang={lang}
               onSelectTxDetail={setSelectedTxDetail}
               onSyncBlockchain={() => syncBlockchainData(account, true)}
+              onNavigateToMarket={() => setActiveTab('market')}
               isSyncing={isSyncingBlockchain}
             />
           )}
@@ -861,6 +957,10 @@ export default function App() {
               onOpenWalletManager={() => setIsWalletManagerOpen(true)}
               onOpenAddWallet={() => setIsVaultModalOpen(true)}
               onOpenLegacyScannerModal={() => setIsLegacyForkScannerOpen(true)}
+              onOpenSpvModal={() => setIsSpvModalOpen(true)}
+              airGapMode={airGapMode}
+              isDeviceOnline={isDeviceOnline}
+              onToggleAirGap={handleToggleAirGap}
             />
           )}
         </div>
@@ -981,6 +1081,11 @@ export default function App() {
             setIsVaultModalOpen(false);
             setIsPrivateKeyScannerOpen(true);
           }}
+          onOpenScannerWithKey={(key) => {
+            setIsVaultModalOpen(false);
+            setQrScannedKeyForSweep(key);
+            setIsLegacyForkScannerOpen(true);
+          }}
         />
 
         {/* Multi-Wallet Manager Modal */}
@@ -1006,6 +1111,19 @@ export default function App() {
           lang={lang}
           currency={currency}
           market={market}
+          onSpvVerifyUpdate={(updatedTx) => {
+            setSelectedTxDetail(updatedTx);
+            setTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
+            setRealTransactions((prev) => prev.map((t) => (t.id === updatedTx.id ? updatedTx : t)));
+          }}
+        />
+
+        {/* Bitcoin SPV (Simplified Payment Verification) Node Modal */}
+        <SpvNodeStatusModal
+          isOpen={isSpvModalOpen}
+          onClose={() => setIsSpvModalOpen(false)}
+          lang={lang}
+          walletTransactions={transactions}
         />
 
         {/* Wallet Readiness & Live Network Analysis Modal */}
@@ -1040,6 +1158,7 @@ export default function App() {
             setIsLegacyForkScannerOpen(false);
             setIsPrivateKeyScannerOpen(true);
           }}
+          onSelectKeyForImport={handleSelectKeyForImport}
         />
 
         {/* Dedicated QR Code Private Key & Paper Wallet Scanner Modal */}

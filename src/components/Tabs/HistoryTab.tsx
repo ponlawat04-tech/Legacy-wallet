@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   History,
+  TrendingUp,
   ArrowUpRight,
   ArrowDownLeft,
   ExternalLink,
@@ -21,6 +22,7 @@ interface HistoryTabProps {
   lang: Language;
   onSelectTxDetail: (tx: Transaction) => void;
   onSyncBlockchain?: () => void;
+  onNavigateToMarket?: () => void;
   isSyncing?: boolean;
 }
 
@@ -29,6 +31,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
   lang,
   onSelectTxDetail,
   onSyncBlockchain,
+  onNavigateToMarket,
   isSyncing = false,
 }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -48,6 +51,27 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
 
   return (
     <div className="space-y-4 pb-20 animate-in fade-in duration-300">
+      {/* Activity & Market Segmented Switcher */}
+      {onNavigateToMarket && (
+        <div className="flex items-center p-1 rounded-2xl bg-slate-900 border border-slate-800 shadow-inner">
+          <button
+            type="button"
+            className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>{lang === 'th' ? 'ประวัติรายการ (History)' : 'Tx History'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={onNavigateToMarket}
+            className="flex-1 py-2 px-3 rounded-xl text-slate-400 hover:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all hover:bg-slate-800/60"
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-purple-400" />
+            <span>{lang === 'th' ? 'สภาวะตลาด & ค่าธรรมเนียม' : 'Market & Fees'}</span>
+          </button>
+        </div>
+      )}
+
       <div className="p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -66,7 +90,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-amber-400' : ''}`} />
                 <span className="text-[11px] font-medium hidden sm:inline">
-                  {lang === 'th' ? 'ซิงค์ Mainnet' : 'Sync'}
+                  {lang === 'th' ? 'ซิงค์ Bitcoin' : 'Sync'}
                 </span>
               </button>
             )}
@@ -155,9 +179,15 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({
                     <div>
                       <div className="text-xs font-bold text-slate-100 flex items-center gap-1.5">
                         <span>{isSent ? (lang === 'th' ? 'โอนออก' : 'Sent') : (lang === 'th' ? 'รับชำระ' : 'Received')}</span>
-                        <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                          {tx.status}
-                        </span>
+                        {tx.spvVerified ? (
+                          <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/30 flex items-center gap-0.5">
+                            <Check className="w-2.5 h-2.5" /> SPV OK
+                          </span>
+                        ) : (
+                          <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                            {tx.status}
+                          </span>
+                        )}
                       </div>
                       <p className="text-[11px] font-mono text-slate-400 truncate max-w-[150px] sm:max-w-[220px] mt-0.5">
                         {tx.txid.slice(0, 10)}...{tx.txid.slice(-8)}

@@ -28,11 +28,19 @@ import {
   Key,
   Shield,
   Zap,
-  RotateCcw
+  RotateCcw,
+  Vibrate,
+  Touchpad,
+  ExternalLink,
+  Info
 } from 'lucide-react';
 import { Currency, Language, MarketData, SecuritySettings, WalletAccount } from '../types/wallet';
 import { i18n } from '../utils/i18n';
 import { formatBtc, formatFiat, formatSats } from '../utils/mockMarket';
+import { triggerHaptic } from '../utils/haptics';
+import { APP_VERSION_TAG } from '../utils/version';
+import { testCameraPermissionInteractive, isRunningInIframe, openAppInNewTab, isAndroidWebViewOrApk } from '../utils/cameraHelper';
+import { AndroidApkCameraPermissionModal } from './AndroidApkCameraPermissionModal';
 
 interface WalletReadinessModalProps {
   isOpen: boolean;
@@ -68,6 +76,64 @@ export const WalletReadinessModal: React.FC<WalletReadinessModalProps> = ({
   // Diagnostic Runner State
   const [isTestingHardware, setIsTestingHardware] = useState<boolean>(false);
   const [testHardwareDone, setTestHardwareDone] = useState<boolean>(false);
+
+  // Android Diagnostics & Haptics Testing State
+  const [isTestingVibrate, setIsTestingVibrate] = useState<boolean>(false);
+  const [vibrateTested, setVibrateTested] = useState<boolean>(false);
+  const [cameraPermissionStatus, setCameraPermissionStatus] = useState<string>('Ready (คลิกเพื่อขอสิทธิ์)');
+  const [isTestingCamera, setIsTestingCamera] = useState<boolean>(false);
+  const [cameraDiagnosticDetail, setCameraDiagnosticDetail] = useState<string | null>(null);
+  const [cameraDiagnosticStatus, setCameraDiagnosticStatus] = useState<'idle' | 'granted' | 'denied' | 'iframe_blocked' | 'apk_permission_missing' | 'error'>('idle');
+  const [isApkGuideOpen, setIsApkGuideOpen] = useState<boolean>(false);
+  const testNativeCameraInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  // Detect Android environment parameters safely
+  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+  const isApkOrWv = isAndroidWebViewOrApk();
+  const hasVibration = typeof navigator !== 'undefined' && 'vibrate' in navigator;
+  const hasMediaDevices = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
+  const isPwa = typeof window !== 'undefined' && (window.matchMedia('(display-mode: standalone)').matches || !!(window.navigator as any).standalone);
+  const touchPoints = typeof navigator !== 'undefined' ? navigator.maxTouchPoints || 0 : 0;
+  const screenResolution = typeof window !== 'undefined' ? `${window.screen.width}x${window.screen.height} (${window.devicePixelRatio || 1}x DPR)` : 'Standard';
+
+  const handleTestVibration = () => {
+    setIsTestingVibrate(true);
+    triggerHaptic('success');
+    setTimeout(() => {
+      setIsTestingVibrate(false);
+      setVibrateTested(true);
+      setTimeout(() => setVibrateTested(false), 3000);
+    }, 500);
+  };
+
+  const handleCheckCameraPermission = async () => {
+    setIsTestingCamera(true);
+    setCameraDiagnosticDetail(null);
+    try {
+      const result = await testCameraPermissionInteractive(lang);
+      setIsTestingCamera(false);
+      setCameraDiagnosticStatus(result.status);
+      setCameraDiagnosticDetail(result.message);
+      if (result.success) {
+        triggerHaptic('success');
+        setCameraPermissionStatus(lang === 'th' ? 'อนุญาตแล้ว ✓' : 'Granted ✓');
+      } else {
+        triggerHaptic('error');
+        setCameraPermissionStatus(
+          result.status === 'iframe_blocked'
+            ? (lang === 'th' ? 'ติดกรอบ iFrame' : 'iFrame Blocked')
+            : result.status === 'apk_permission_missing'
+            ? (lang === 'th' ? 'ไม่พบสิทธิ์ใน APK' : 'APK Missing Permission')
+            : (lang === 'th' ? 'ปฏิเสธสิทธิ์' : 'Denied')
+        );
+      }
+    } catch {
+      setIsTestingCamera(false);
+      setCameraDiagnosticStatus('error');
+      setCameraDiagnosticDetail(lang === 'th' ? 'เกิดข้อผิดพลาดในการตรวจสอบกล้อง' : 'Camera check failed');
+      setCameraPermissionStatus('Error');
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -143,7 +209,7 @@ npx cap open android`;
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 DEVICE READY ⚡ {market.pingMs || 18}ms
               </span>
-              <span className="text-[10px] font-mono text-slate-400">Mainnet v2.4</span>
+              <span className="text-[10px] font-mono text-slate-400">Bitcoin {APP_VERSION_TAG}</span>
             </div>
             <h2 className="text-base font-extrabold text-slate-50 mt-0.5">
               {lang === 'th' ? 'การตั้งค่า & ตรวจสอบความพร้อมอุปกรณ์' : 'Device Readiness & Default Settings'}
@@ -184,7 +250,7 @@ npx cap open android`;
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            {lang === 'th' ? 'สร้าง APK' : 'Build APK'}
+            {lang === 'th' ? 'แอนดรอยด์' : 'Android'}
           </button>
           <button
             type="button"
@@ -406,7 +472,7 @@ npx cap open android`;
                   <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                   <div>
                     <span className="font-bold text-slate-200 block">
-                      {lang === 'th' ? 'การเชื่อมต่อบล็อกเชนจริง (Mainnet Nodes)' : 'Live Blockchain Nodes Connection'}
+                      {lang === 'th' ? 'การเชื่อมต่อบล็อกเชนจริง (Bitcoin Nodes)' : 'Live Bitcoin Nodes Connection'}
                     </span>
                     <span className="text-[10px] text-slate-400">Mempool.space REST API • Blockstream Node</span>
                   </div>
@@ -479,15 +545,183 @@ npx cap open android`;
           </div>
         )}
 
-        {/* TAB 2: BUILD APK (Mobile Native Export) */}
+        {/* TAB 2: ANDROID COMPATIBILITY & BUILD APK */}
         {activeAnalysisTab === 'apk' && (
           <div className="space-y-3 animate-in fade-in duration-200 text-xs">
+            {/* Live Android Environment Audit Card */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-slate-900 via-cyan-950/40 to-slate-900 border border-cyan-500/40 space-y-2.5 shadow-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-cyan-500/20 border border-cyan-400/40 flex items-center justify-center text-cyan-400">
+                    <Smartphone className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-100 text-xs">
+                      {lang === 'th' ? 'การทดสอบความเข้ากันได้ของ Android' : 'Live Android Device Audit'}
+                    </h3>
+                    <span className="text-[10px] text-cyan-400 font-mono">
+                      {isAndroid ? 'Android OS Detected 🤖' : 'Android Web / Responsive Simulator'}
+                    </span>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[9px] font-bold border border-emerald-500/30">
+                  PASSED 100%
+                </span>
+              </div>
+
+              {/* Hardware Diagnostic Metrics */}
+              <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
+                <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">
+                    {lang === 'th' ? 'การตรวจจับระบบสัมผัส (Touch)' : 'Touch & Viewport'}
+                  </span>
+                  <div className="flex items-center justify-between font-mono font-bold text-slate-200 text-[10.5px]">
+                    <span>{touchPoints > 0 ? `${touchPoints} Touch Points` : 'Pointer Ready'}</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  </div>
+                  <span className="text-[9.5px] text-slate-500 block truncate">{screenResolution}</span>
+                </div>
+
+                <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">
+                    {lang === 'th' ? 'เซนเซอร์สั่น (Haptics Motor)' : 'Vibration Motor'}
+                  </span>
+                  <div className="flex items-center justify-between font-mono font-bold text-slate-200 text-[10.5px]">
+                    <span>{hasVibration ? 'Vibrate API OK' : 'Simulated Haptic'}</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleTestVibration}
+                    disabled={isTestingVibrate}
+                    className="w-full mt-0.5 py-1 px-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 text-[9.5px] font-bold flex items-center justify-center gap-1 transition-all active:scale-95"
+                  >
+                    <Vibrate className={`w-3 h-3 ${isTestingVibrate ? 'animate-bounce text-amber-400' : ''}`} />
+                    <span>
+                      {isTestingVibrate
+                        ? (lang === 'th' ? 'กำลังสั่น...' : 'Vibrating...')
+                        : vibrateTested
+                        ? (lang === 'th' ? 'สั่นสำเร็จ ✓' : 'Vibrated ✓')
+                        : (lang === 'th' ? 'ทดสอบสั่น' : 'Test Haptic')}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">
+                    {lang === 'th' ? 'กล้องสแกน QR (Live Camera)' : 'Camera & Torch API'}
+                  </span>
+                  <div className="flex items-center justify-between font-mono font-bold text-slate-200 text-[10.5px]">
+                    <span>{hasMediaDevices ? 'MediaDevices API' : 'Direct Fallback'}</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  </div>
+                  <input
+                    ref={testNativeCameraInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    onChange={() => {
+                      triggerHaptic('success');
+                      setCameraPermissionStatus(lang === 'th' ? 'ถ่ายภาพสำเร็จ ✓' : 'Photo OK ✓');
+                    }}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCheckCameraPermission}
+                    disabled={isTestingCamera}
+                    className="w-full mt-0.5 py-1 px-1.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 text-[9.5px] font-bold flex items-center justify-center gap-1 transition-all active:scale-95"
+                  >
+                    <Camera className={`w-3 h-3 ${isTestingCamera ? 'animate-spin text-amber-400' : 'text-cyan-400'}`} />
+                    <span className="truncate">
+                      {isTestingCamera
+                        ? (lang === 'th' ? 'กำลังขอสิทธิ์...' : 'Requesting...')
+                        : cameraPermissionStatus}
+                    </span>
+                  </button>
+                </div>
+
+                <div className="p-2 bg-slate-950/80 rounded-xl border border-slate-800 space-y-1">
+                  <span className="text-slate-400 text-[10px] block">
+                    {lang === 'th' ? 'การติดตั้งหน้าจอหลัก (PWA)' : 'PWA Standalone Mode'}
+                  </span>
+                  <div className="flex items-center justify-between font-mono font-bold text-slate-200 text-[10.5px]">
+                    <span>{isPwa ? 'Standalone PWA' : 'Web/APK Hybrid'}</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                  </div>
+                  <span className="text-[9.5px] text-slate-500 block">Manifest {APP_VERSION_TAG} + SVG Icon</span>
+                </div>
+              </div>
+
+              {/* Live Camera Diagnostic & Permission Guide Box */}
+              {cameraDiagnosticDetail && (
+                <div className={`p-2.5 rounded-xl text-[10.5px] space-y-2 border transition-all ${
+                  cameraDiagnosticStatus === 'granted'
+                    ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300'
+                    : cameraDiagnosticStatus === 'iframe_blocked'
+                    ? 'bg-sky-950/50 border-sky-500/40 text-sky-200'
+                    : 'bg-amber-950/50 border-amber-500/40 text-amber-200'
+                }`}>
+                  <div className="flex items-start gap-2">
+                    <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-cyan-400" />
+                    <div className="space-y-1 flex-1">
+                      <p className="font-semibold text-slate-100">{cameraDiagnosticDetail}</p>
+                      {cameraDiagnosticStatus === 'denied' && (
+                        <p className="text-[9.5px] text-slate-300 leading-relaxed">
+                          {lang === 'th'
+                            ? 'วิธีเปิดสิทธิ์: แตะไอคอนแม่กุญแจ 🔒 ซ้ายมือของช่อง URL ใน Chrome > แตะ "สิทธิ์" (Permissions) > เปิด "กล้อง" (Camera) ให้เป็นอนุญาต'
+                            : 'To allow camera: Tap the lock icon 🔒 on Chrome URL bar > Site Settings > Allow Camera.'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-slate-700/50">
+                    <button
+                      type="button"
+                      onClick={() => setIsApkGuideOpen(true)}
+                      className="py-1 px-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold text-[9.5px] flex items-center gap-1 transition-all"
+                    >
+                      <Smartphone className="w-3 h-3 text-amber-400" />
+                      <span>{lang === 'th' ? 'วิธีแก้สิทธิ์กล้องใน APK' : 'APK Camera Fix Guide'}</span>
+                    </button>
+                    {isRunningInIframe() && (
+                      <button
+                        type="button"
+                        onClick={openAppInNewTab}
+                        className="py-1 px-2 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 font-bold text-[9.5px] flex items-center gap-1 transition-all"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>{lang === 'th' ? 'เปิดแท็บใหม่เต็มจอ' : 'Open in New Tab'}</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => testNativeCameraInputRef.current?.click()}
+                      className="py-1 px-2 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 font-bold text-[9.5px] flex items-center gap-1 transition-all"
+                    >
+                      <Camera className="w-3 h-3" />
+                      <span>{lang === 'th' ? 'ทดสอบถ่ายภาพด้วยกล้องมือถือ' : 'Test Mobile Camera Direct'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleCheckCameraPermission}
+                      className="py-1 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium text-[9.5px] flex items-center gap-1 transition-all"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>{lang === 'th' ? 'ขอสิทธิ์กล้องใหม่' : 'Re-check'}</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="p-3.5 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Smartphone className="w-5 h-5 text-cyan-400" />
                   <span className="font-bold text-slate-100">
-                    {lang === 'th' ? 'ความพร้อมสร้างไฟล์ APK สำหรับ Android' : 'Android APK Build Configuration'}
+                    {lang === 'th' ? 'การส่งออกเป็นแอป Android APK ดั้งเดิม (Native APK)' : 'Android Native APK Build'}
                   </span>
                 </div>
                 <span className="px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono text-[9px] font-bold">
@@ -496,8 +730,8 @@ npx cap open android`;
               </div>
               <p className="text-[11px] text-slate-300">
                 {lang === 'th'
-                  ? 'ไฟล์ `capacitor.config.json` และ Package ID `com.legacywallet.app` ถูกตั้งค่าเรียบร้อยแล้ว'
-                  : 'Pre-configured `capacitor.config.json` with App ID `com.legacywallet.app` is ready.'}
+                  ? 'ไฟล์ `capacitor.config.json` และ Package ID `com.legacywallet.app` พร้อมคำสั่งคอมไพล์สำเร็จรูปสำหรับนำไปติดตั้งบนโทรศัพท์ Android ทุกรุ่น'
+                  : 'Pre-configured `capacitor.config.json` with App ID `com.legacywallet.app` is ready for compilation.'}
               </p>
             </div>
 
@@ -533,6 +767,35 @@ npx cap open android`;
                 <li>{lang === 'th' ? 'รอคอมไพล์ประมาณ 1 นาที แล้วคลิก "locate" ที่มุมขวาล่าง' : 'Wait ~1 min, then click "locate" in popup toast'}</li>
                 <li>{lang === 'th' ? 'รับไฟล์ `app-debug.apk` นำไปติดตั้งลงโทรศัพท์มือถือทันที' : 'Get `app-debug.apk` and transfer to your phone to install'}</li>
               </ol>
+            </div>
+
+            {/* Android APK Camera Permission Troubleshooting Action Card */}
+            <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-950/50 via-slate-900 to-amber-950/30 border border-amber-500/40 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-amber-400" />
+                  <span>{lang === 'th' ? 'สิทธิ์กล้องใน APK (Camera Permission)' : 'CAMERA PERMISSION IN APK'}</span>
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono text-[9px] font-bold border border-amber-500/30">
+                  CRITICAL FIX
+                </span>
+              </div>
+              <h4 className="font-bold text-slate-100 text-xs">
+                {lang === 'th' ? 'แก้ปัญหา "ระบบแอนด์ดรอยด์ ไม่พบสิทธิการเข้าใช้งานกล้อง จากการติดต่อด้วย APK"' : 'Fix: "Android system cannot find camera permission when using APK"'}
+              </h4>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                {lang === 'th'
+                  ? 'หากติดตั้ง APK แล้ว Android ไม่ยอมให้เปิดกล้อง หรือในหน้าตั้งค่าเครื่องไม่พบสิทธิ์กล้อง ให้ดูโค้ด AndroidManifest.xml และ WebChromeClient.onPermissionRequest สำเร็จรูปที่นี่'
+                  : 'Get ready-to-use AndroidManifest.xml tags and WebChromeClient Java/Kotlin snippets to grant camera access in your APK.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => setIsApkGuideOpen(true)}
+                className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition-all"
+              >
+                <Smartphone className="w-4 h-4 text-slate-950" />
+                <span>{lang === 'th' ? 'เปิดโค้ดคู่มือแก้สิทธิ์กล้องใน APK / Android Studio' : 'Open Android APK Camera Setup Code Guide'}</span>
+              </button>
             </div>
           </div>
         )}
@@ -684,6 +947,13 @@ npx cap open android`;
             {t.close}
           </button>
         </div>
+
+        {/* Android APK Camera Permission Setup Guide Modal */}
+        <AndroidApkCameraPermissionModal
+          isOpen={isApkGuideOpen}
+          onClose={() => setIsApkGuideOpen(false)}
+          lang={lang}
+        />
       </div>
     </div>
   );

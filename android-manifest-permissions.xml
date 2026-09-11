@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ==================================================================================
+  ANDROID APK CAMERA PERMISSIONS & WEBVIEW SETUP GUIDE
+  คำแนะนำการแก้ไขปัญหา: "ระบบแอนด์ดรอยด์ ไม่พบสิทธิการเข้าใช้งานกล้อง จากการติดต่อด้วย APK"
+  ==================================================================================
+
+  สาเหตุที่ระบบ Android แจ้งว่าไม่พบสิทธิการเข้าใช้งานกล้อง:
+  1. ในไฟล์ android/app/src/main/AndroidManifest.xml ไม่ได้ประกาศ <uses-permission android:name="android.permission.CAMERA" />
+     ทำให้ระบบปฏิบัติการ Android ในหน้า "การตั้งค่า > แอป > สิทธิ์" ไม่แสดงเมนูกล้องให้ผู้ใช้กดอนุญาต
+  2. สำหรับแอป Android WebView / Custom APK: ระบบ WebRTC (getUserMedia) จะถูกบล็อกโดยค่าเริ่มต้น
+     หากใน MainActivity ไม่ได้ตั้งค่า WebChromeClient.onPermissionRequest(...)
+  3. ไม่ได้ขอ Runtime Permission (ActivityCompat.requestPermissions) ในขณะรันไทม์บน Android 6.0+
+
+  ==================================================================================
+  ส่วนที่ 1: โค้ดสำหรับวางใน android/app/src/main/AndroidManifest.xml
+  วางไว้ภายในแท็ก <manifest> ก่อนแท็ก <application>:
+  ==================================================================================
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    package="com.legacywallet.app">
+
+    <!-- สิทธิ์การใช้งานกล้องสำหรับสแกน QR Code (PSBT, Private Key, Address) -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
+
+    <!-- แจ้งฮาร์ดแวร์กล้อง (ตั้งเป็น required="false" เพื่อให้อุปกรณ์ที่ไม่มีกล้องออโต้โฟกัสยังติดตั้งได้) -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+
+    <!-- สิทธิ์อินเทอร์เน็ตและการสั่นเตือน Haptic -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- สำหรับ Android 11+ (API Level 30 ขึ้นไป) เพื่อให้เปิดกล้องและคลังภาพได้ -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.GET_CONTENT" />
+        </intent>
+    </queries>
+
+    <application
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:label="Legacy Wallet"
+        android:supportsRtl="true"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        tools:targetApi="34">
+        <!-- ... กิจกรรมของคุณ (Activities) ... -->
+    </application>
+
+</manifest>
+
+<!--
+  ==================================================================================
+  ส่วนที่ 1.1: ไฟล์ res/xml/network_security_config.xml (SSL Pinning & No Cleartext)
+  ==================================================================================
+  <?xml version="1.0" encoding="utf-8"?>
+  <network-security-config>
+      <!-- 1. ห้ามการสื่อสารผ่าน Cleartext (HTTP ธรรมดา) ทั่วทั้งแอป เพื่อบังคับ HTTPS 100% -->
+      <base-config cleartextTrafficPermitted="false">
+          <trust-anchors>
+              <certificates src="system" />
+          </trust-anchors>
+      </base-config>
+
+      <!-- 2. บังคับ SSL / Public Key Pinning (SPKI Pinning) สำหรับโหนดบล็อกเชน -->
+      <domain-config cleartextTrafficPermitted="false">
+          <domain includeSubdomains="true">mempool.space</domain>
+          <domain includeSubdomains="true">blockstream.info</domain>
+          <domain includeSubdomains="true">blockchain.info</domain>
+          
+          <pin-set expiration="2027-12-31">
+              <!-- Let's Encrypt / Cloudflare / Canonical SPKI SHA-256 Hashes -->
+              <pin digest="SHA-256">r/mIkG3eEpVdm+u/ko/cwxzOMo1bk4TyHIlByibiA5E=</pin>
+              <!-- Backup Pin -->
+              <pin digest="SHA-256">YLh1dUR9y6Kja30RrAn7JKnbQG/uEtLMkBgFF2Fuihg=</pin>
+          </pin-set>
+      </domain-config>
+  </network-security-config>
+
+  ==================================================================================
+  ส่วนที่ 1.2: การเข้ารหัส HSM ผ่าน Android Keystore + AES-GCM 256-bit
+  ==================================================================================
+  // สร้างและควบคุม Master Key ภายใน Hardware Security Module (StrongBox / TEE)
+  KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(
+          "legacy_vault_master_key",
+          KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
+          .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+          .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+          .setKeySize(256)
+          .setUserAuthenticationRequired(true) // บังคับ Biometric หรือ Device PIN
+          .setIsStrongBoxBacked(true)          // ใช้ชิป HSM เฉพาะ (StrongBox Keymaster)
+          .build();
+
+  KeyGenerator keyGenerator = KeyGenerator.getInstance(
+          KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
+  keyGenerator.init(spec);
+  keyGenerator.generateKey();
+
+  ==================================================================================
+  ส่วนที่ 1.3: ฐานข้อมูล Room Database เข้ารหัสด้วย SQLCipher + EncryptedSharedPreferences
+  ==================================================================================
+  // ก. EncryptedSharedPreferences (Android Jetpack Security)
+  MasterKey masterKey = new MasterKey.Builder(context)
+          .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+          .setRequestStrongBoxStorage(true)
+          .build();
+
+  SharedPreferences securePrefs = EncryptedSharedPreferences.create(
+          context,
+          "legacy_wallet_secure_prefs",
+          masterKey,
+          EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+          EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+  );
+
+  // ข. Room Database เข้ารหัสด้วย SQLCipher (256-bit AES)
+  SupportFactory passphraseFactory = new SupportFactory(SQLiteDatabase.getBytes("YOUR_SECURE_PASSPHRASE".toCharArray()));
+  AppDatabase db = Room.databaseBuilder(context, AppDatabase.class, "legacy_vault.db")
+          .openHelperFactory(passphraseFactory)
+          .build();
+-->
+
+<!--
+  ==================================================================================
+  ส่วนที่ 2: โค้ด MainActivity.java (สำหรับ Android Studio WebView APK)
+  ==================================================================================
+  
+  package com.legacywallet.app;
+
+  import android.Manifest;
+  import android.content.pm.PackageManager;
+  import android.os.Bundle;
+  import android.webkit.PermissionRequest;
+  import android.webkit.WebChromeClient;
+  import android.webkit.WebSettings;
+  import android.webkit.WebView;
+  import androidx.appcompat.app.AppCompatActivity;
+  import androidx.core.app.ActivityCompat;
+  import androidx.core.content.ContextCompat;
+
+  public class MainActivity extends AppCompatActivity {
+      private static final int CAMERA_PERMISSION_REQUEST_CODE = 101;
+      private WebView webView;
+
+      @Override
+      protected void onCreate(Bundle savedInstanceState) {
+          super.onCreate(savedInstanceState);
+          setContentView(R.layout.activity_main);
+
+          // 1. ขอสิทธิ์กล้องระดับระบบ Android OS (Runtime Permission)
+          if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                  != PackageManager.PERMISSION_GRANTED) {
+              ActivityCompat.requestPermissions(this,
+                      new String[]{Manifest.permission.CAMERA},
+                      CAMERA_PERMISSION_REQUEST_CODE);
+          }
+
+          webView = findViewById(R.id.webview);
+          WebSettings settings = webView.getSettings();
+          settings.setJavaScriptEnabled(true);
+          settings.setDomStorageEnabled(true);
+          settings.setMediaPlaybackRequiresUserGesture(false);
+
+          // 2. สำคัญที่สุด! อนุญาตสิทธิ์กล้องใน WebView (WebChromeClient)
+          webView.setWebChromeClient(new WebChromeClient() {
+              @Override
+              public void onPermissionRequest(final PermissionRequest request) {
+                  // ให้สิทธิ์ WebRTC getUserMedia เข้าถึงกล้องได้ทันที
+                  runOnUiThread(() -> {
+                      request.grant(request.getResources());
+                  });
+              }
+          });
+
+          webView.loadUrl("file:///android_asset/dist/index.html");
+      }
+  }
+
+  ==================================================================================
+  ส่วนที่ 3: กรณีสร้าง APK ด้วย Capacitor (คำสั่งคอมไพล์)
+  ==================================================================================
+  npm install @capacitor/core @capacitor/cli @capacitor/android
+  npm run build
+  npx cap add android
+  # เพิ่ม <uses-permission android:name="android.permission.CAMERA" /> ใน android/app/src/main/AndroidManifest.xml
+  npx cap sync
+  npx cap open android
+  # จากนั้นใน Android Studio เลือก Build > Build Bundle(s) / APK(s) > Build APK(s)
+-->
+

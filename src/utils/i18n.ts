@@ -4,7 +4,7 @@ export const i18n = {
   th: {
     // App Header & Navigation
     appName: "Legacy wallet",
-    appSubtitle: "กระเป๋า Multi-Chain และบิตคอยน์ความปลอดภัยระดับสากล",
+    appSubtitle: "กระเป๋าบิตคอยน์และเหรียญแยกสาขาความปลอดภัยระดับสากล (Bitcoin & Hard Forks)",
     offlineMode: "ออฟไลน์ (แอร์แกป)",
     onlineMode: "เชื่อมต่อเครือข่ายแล้ว",
     vaultSealedBadge: "ซีลความปลอดภัยขั้นสูงสุดแล้ว",
@@ -186,7 +186,7 @@ export const i18n = {
   en: {
     // App Header & Navigation
     appName: "Legacy wallet",
-    appSubtitle: "International Grade Multi-Chain & Bitcoin Cold Vault",
+    appSubtitle: "International Grade Bitcoin & Hard Forks Cold Vault",
     offlineMode: "Offline (Air-Gapped)",
     onlineMode: "Network Connected",
     vaultSealedBadge: "Maximum Security Sealed",

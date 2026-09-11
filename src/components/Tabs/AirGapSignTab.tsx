@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   ShieldCheck,
+  Send,
   Camera,
   QrCode,
   Lock,
@@ -24,14 +25,17 @@ import {
   Download,
   AlertCircle,
   Snowflake,
-  Unlock
+  Unlock,
+  Smartphone
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { Currency, Language, MarketData, SecuritySettings, Transaction, WalletAccount } from '../../types/wallet';
 import { i18n } from '../../utils/i18n';
-import { formatFiat } from '../../utils/mockMarket';
+import { formatFiat, INITIAL_MARKET_DATA } from '../../utils/mockMarket';
 import { parseAndVerifyPsbt, ParsedPsbtTx } from '../../utils/psbtAirGap';
 import { broadcastRealTxHex } from '../../utils/blockchainApi';
+import { acquireCameraStream, isRunningInIframe, openAppInNewTab, isAndroidWebViewOrApk } from '../../utils/cameraHelper';
+import { AndroidApkCameraPermissionModal } from '../AndroidApkCameraPermissionModal';
 
 interface AirGapSignTabProps {
   account: WalletAccount;
@@ -40,17 +44,19 @@ interface AirGapSignTabProps {
   lang: Language;
   onOpenPinModal: (action: () => void) => void;
   onSendSuccess: (tx: Transaction) => void;
+  onNavigateToSend?: () => void;
   security?: SecuritySettings;
   onUnfreeze?: () => void;
 }
 
 export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
   account,
-  market = { priceUsd: 96450, priceThb: 3420000, change24h: 2.5, high24h: 98000, low24h: 94000, volume24h: '42B', feeEstimates: { fastestSatVb: 22, halfHourSatVb: 16, hourSatVb: 10, minimumSatVb: 4 }, mempoolCongestion: 'moderate', pingMs: 18 },
+  market = INITIAL_MARKET_DATA,
   currency = 'THB' as Currency,
   lang,
   onOpenPinModal,
   onSendSuccess,
+  onNavigateToSend,
   security,
   onUnfreeze,
 }) => {
@@ -58,6 +64,7 @@ export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
   const [isCameraActive, setIsCameraActive] = useState<boolean>(false);
   const [cameraFacing, setCameraFacing] = useState<'environment' | 'user'>('environment');
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isApkGuideOpen, setIsApkGuideOpen] = useState<boolean>(false);
   const [manualInputOpen, setManualInputOpen] = useState<boolean>(false);
   const [manualPsbtText, setManualPsbtText] = useState<string>('');
 
@@ -164,57 +171,7 @@ export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
       }
 
       let stream: MediaStream | null = null;
-      let lastError: any = null;
-
-      // Tiered fallback constraints to maximize compatibility across Android, iOS, and PC webcams
-      const constraintCandidates: MediaStreamConstraints[] = [
-        {
-          video: {
-            facingMode: { ideal: facing },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-          },
-        },
-        {
-          video: {
-            facingMode: { ideal: facing },
-          },
-        },
-        {
-          video: {
-            facingMode: facing,
-          },
-        },
-        {
-          video: true,
-        },
-      ];
-
-      if (hasMediaDevices) {
-        for (const constraints of constraintCandidates) {
-          try {
-            stream = await navigator.mediaDevices.getUserMedia(constraints);
-            if (stream) break;
-          } catch (err: any) {
-            lastError = err;
-            console.warn('Camera constraint failed, trying next tier...', constraints, err);
-            // If user explicitly denied permission, break immediately instead of retrying
-            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-              break;
-            }
-          }
-        }
-      } else if (hasLegacyGetUserMedia) {
-        const legacyFn = (navigator as any).getUserMedia || (navigator as any).webkitGetUserMedia || (navigator as any).mozGetUserMedia;
-        stream = await new Promise<MediaStream>((resolve, reject) => {
-          legacyFn.call(navigator, { video: true }, resolve, reject);
-        });
-      }
-
-      if (!stream) {
-        throw lastError || new Error('Could not access any video camera device.');
-      }
-
+      stream = await acquireCameraStream(facing);
       streamRef.current = stream;
 
       if (videoRef.current) {
@@ -247,24 +204,39 @@ export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
       console.warn('Camera startup failure:', err);
       const isPermissionDenied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
       const isNotFound = err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError';
+      const inApk = isAndroidWebViewOrApk();
 
       if (isPermissionDenied) {
-        setCameraError(
-          lang === 'th'
-            ? 'การเข้าถึงกล้องถูกปฏิเสธ (Permission Denied) โปรดอนุญาตสิทธิ์กล้องในการตั้งค่าเบราว์เซอร์ หรือใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ"'
-            : 'Camera permission denied. Please allow camera access in your browser settings or use "Direct Camera Photo".'
-        );
+        if (inApk) {
+          setCameraError(
+            lang === 'th'
+              ? 'ระบบแอนด์ดรอยด์ไม่พบสิทธิ์การเข้าใช้งานกล้องจาก APK (ต้องตั้งค่า android.permission.CAMERA ใน AndroidManifest.xml และ WebChromeClient ใน MainActivity)'
+              : 'Android system did not find camera permission in APK. Requires AndroidManifest.xml and WebChromeClient setup.'
+          );
+        } else if (isRunningInIframe()) {
+          setCameraError(
+            lang === 'th'
+              ? 'ระบบพรีวิว iFrame จำกัดการเข้าถึงกล้อง (แตะ "เปิดแท็บใหม่เต็มจอ" เพื่อเปิดกล้องบน Chrome หรือใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ")'
+              : 'Camera blocked by iFrame preview policy. Open in a new tab or use "Direct Camera Photo".'
+          );
+        } else {
+          setCameraError(
+            lang === 'th'
+              ? 'การเข้าถึงกล้องถูกปฏิเสธ (โปรดแตะไอคอนแม่กุญแจ 🔒 ที่แถบพิมพ์ URL บน Chrome > อนุญาตสิทธิ์กล้อง หรือใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ")'
+              : 'Camera permission denied. Tap the lock icon 🔒 on Chrome URL bar > Site Settings > Allow Camera, or use "Direct Camera Photo".'
+          );
+        }
       } else if (isNotFound) {
         setCameraError(
           lang === 'th'
-            ? 'ไม่พบอุปกรณ์กล้องบนเครื่องนี้ (สามารถอัปโหลดภาพ QR หรือวางโค้ด PSBT ได้)'
+            ? 'ไม่พบอุปกรณ์กล้องบนเครื่องนี้ (สามารถอัปโหลดภาพ QR หรือใช้ปุ่มถ่ายภาพกล้องมือถือ)'
             : 'No camera hardware found on this device. You can upload a QR image or paste PSBT text.'
         );
       } else {
         setCameraError(
           lang === 'th'
-            ? `ไม่สามารถเปิดกล้องสดได้: ${err?.message || 'ข้อจำกัดด้านความปลอดภัยหรือสิทธิ์ iFrame'} (แนะนำให้ใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ" หรือเปิดในแท็บใหม่)`
-            : `Unable to open camera: ${err?.message || 'Security sandbox restriction'}. You can use "Direct Camera Photo" or open in a new tab.`
+            ? `ไม่สามารถเปิดกล้องสดได้: ${err?.message || 'อุปกรณ์ไม่พร้อมใช้งาน'} (สามารถใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ" หรือเปิดในแท็บใหม่)`
+            : `Unable to open camera: ${err?.message || 'Device unavailable'}. You can use "Direct Camera Photo" or open in a new tab.`
         );
       }
       setIsCameraActive(false);
@@ -461,6 +433,27 @@ export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
 
   return (
     <div className="space-y-4 pb-20 animate-in fade-in duration-300">
+      {/* Transact Mode Segmented Switcher */}
+      {onNavigateToSend && (
+        <div className="flex items-center p-1 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-inner">
+          <button
+            type="button"
+            onClick={onNavigateToSend}
+            className="flex-1 py-2 px-3 rounded-xl text-slate-400 hover:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all hover:bg-slate-800/60"
+          >
+            <Send className="w-3.5 h-3.5 text-amber-400" />
+            <span>{lang === 'th' ? 'โอนเงิน (Send)' : 'Send BTC / Coins'}</span>
+          </button>
+          <button
+            type="button"
+            className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-cyan-500 to-indigo-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-cyan-500/20"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>{lang === 'th' ? 'เซ็นออฟไลน์ (Air-Gap)' : 'Air-Gap Sign PSBT'}</span>
+          </button>
+        </div>
+      )}
+
       {/* Hidden file input for QR image file picker */}
       <input
         ref={fileInputRef}
@@ -635,6 +628,17 @@ export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
 
                 {/* Quick Action Recovery Buttons */}
                 <div className="flex flex-wrap gap-1.5 pt-1 border-t border-amber-500/20">
+                  {isRunningInIframe() && (
+                    <button
+                      type="button"
+                      onClick={openAppInNewTab}
+                      className="px-2.5 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 border border-sky-500/40 text-sky-300 font-bold text-[11px] flex items-center gap-1.5 transition-all active:scale-95"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>{lang === 'th' ? 'เปิดแท็บใหม่เต็มจอ' : 'Open in New Tab'}</span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
                     onClick={() => cameraShutterInputRef.current?.click()}
@@ -651,6 +655,15 @@ export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
                   >
                     <Upload className="w-3.5 h-3.5 text-sky-400" />
                     <span>{lang === 'th' ? 'เลือกรูปภาพ QR' : 'Upload Image'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsApkGuideOpen(true)}
+                    className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-[11px] flex items-center gap-1.5 transition-all active:scale-95"
+                  >
+                    <Smartphone className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{lang === 'th' ? 'วิธีแก้สิทธิ์กล้อง APK' : 'APK Camera Fix'}</span>
                   </button>
 
                   <button
@@ -969,6 +982,13 @@ export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
             : 'Air-gap signing requires zero Wi-Fi, Bluetooth, or USB connection. Unsigned PSBT payloads are transferred strictly via visual QR optics, keeping private keys completely isolated.'}
         </p>
       </div>
+
+      {/* Android APK Camera Permission Setup Guide Modal */}
+      <AndroidApkCameraPermissionModal
+        isOpen={isApkGuideOpen}
+        onClose={() => setIsApkGuideOpen(false)}
+        lang={lang}
+      />
     </div>
   );
 };

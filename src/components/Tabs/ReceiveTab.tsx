@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   QrCode,
   Copy,
@@ -13,13 +13,17 @@ import {
   ArrowRight,
   Layers,
   ExternalLink,
-  Search
+  Search,
+  Sparkles,
+  Cpu,
+  BadgePercent
 } from 'lucide-react';
 import { Currency, Language, MarketData, WalletAccount } from '../../types/wallet';
 import { i18n } from '../../utils/i18n';
 import { formatFiat } from '../../utils/mockMarket';
 import { SUPPORTED_MULTI_CHAINS, ChainId, ChainConfig } from '../../types/multiChain';
 import { deriveMultiChainAddresses, DerivedChainAccount } from '../../utils/multiChainVault';
+import { deriveAllBtcVariantsFromSecret, AllBtcAddressFormats } from '../../utils/bitcoinKeyEngine';
 
 interface ReceiveTabProps {
   account: WalletAccount;
@@ -29,6 +33,9 @@ interface ReceiveTabProps {
   onOpenLegacyScannerModal?: () => void;
 }
 
+type BtcFormatKey = 'native_segwit' | 'taproot' | 'nested_segwit' | 'legacy_compressed' | 'legacy_uncompressed';
+type BchFormatKey = 'cashaddr' | 'legacy';
+
 export const ReceiveTab: React.FC<ReceiveTabProps> = ({
   account,
   market,
@@ -37,12 +44,23 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
   onOpenLegacyScannerModal,
 }) => {
   const [selectedChainId, setSelectedChainId] = useState<ChainId>('BTC');
+  const [activeBtcFormat, setActiveBtcFormat] = useState<BtcFormatKey>('native_segwit');
+  const [activeBchFormat, setActiveBchFormat] = useState<BchFormatKey>('cashaddr');
+
   const [derivedChains, setDerivedChains] = useState<DerivedChainAccount[]>([]);
   const [requestedAmountStr, setRequestedAmountStr] = useState<string>('');
   const [copied, setCopied] = useState<boolean>(false);
   const [searchChain, setSearchChain] = useState<string>('');
 
   const t = i18n[lang];
+
+  // Deterministically derive all Bitcoin address formats from account
+  const btcVariants: AllBtcAddressFormats = useMemo(() => {
+    return deriveAllBtcVariantsFromSecret(
+      account.publicKey || account.address,
+      account.has25thWord ? 'passphrase' : ''
+    );
+  }, [account.publicKey, account.address, account.has25thWord]);
 
   useEffect(() => {
     let isMounted = true;
@@ -63,30 +81,100 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
     formatLabel: activeChainConfig.addressFormatName,
   };
 
+  // Determine active address and metadata based on selected format
+  let currentDisplayAddress = activeDerived.address;
+  let currentFormatLabel = activeDerived.formatLabel || activeChainConfig.addressFormatName;
+  let currentDerivationPath = activeChainConfig.derivationPath;
+  let currentScriptType = 'P2WPKH';
+  let currentFeeSavings = lang === 'th' ? 'ประหยัดค่าขุด ~38%' : 'Lowest Fee (~38% cheaper)';
+  let formatDescription = '';
+
+  if (selectedChainId === 'BTC') {
+    if (activeBtcFormat === 'native_segwit') {
+      currentDisplayAddress = btcVariants.nativeSegwit;
+      currentFormatLabel = 'Native SegWit (Bech32)';
+      currentDerivationPath = "m/84'/0'/0'/0/0";
+      currentScriptType = 'P2WPKH (Witness v0)';
+      currentFeeSavings = lang === 'th' ? 'ประหยัดค่าขุดสูงสุด (~38%)' : 'Lowest Fee (~38% cheaper)';
+      formatDescription = lang === 'th'
+        ? 'มาตรฐานสากลยุคใหม่ ค่าธรรมเนียมต่ำที่สุด รองรับกระเป๋าหลักและ Exchange ชั้นนำทั้งหมด'
+        : 'Modern standard with lowest transaction fees. Supported by almost all modern wallets and exchanges.';
+    } else if (activeBtcFormat === 'taproot') {
+      currentDisplayAddress = btcVariants.taproot;
+      currentFormatLabel = 'Taproot (Bech32m)';
+      currentDerivationPath = "m/86'/0'/0'/0/0";
+      currentScriptType = 'P2TR (Witness v1 Schnorr)';
+      currentFeeSavings = lang === 'th' ? 'ความเป็นส่วนตัวสูงสุด (Schnorr)' : 'Maximum Privacy (Schnorr)';
+      formatDescription = lang === 'th'
+        ? 'อัปเกรดล่าสุดของบิตคอยน์ ใช้ลายเซ็น Schnorr ช่วยซ่อนสคริปต์ธุรกรรมและเพิ่มความเป็นส่วนตัวสูงสุด'
+        : 'Latest Bitcoin upgrade featuring Schnorr signatures, batching, and enhanced on-chain privacy.';
+    } else if (activeBtcFormat === 'nested_segwit') {
+      currentDisplayAddress = btcVariants.nestedSegwit;
+      currentFormatLabel = 'Nested SegWit (P2SH - 3...)';
+      currentDerivationPath = "m/49'/0'/0'/0/0";
+      currentScriptType = 'P2SH-P2WPKH';
+      currentFeeSavings = lang === 'th' ? 'เข้ากันได้กับเว็บเทรดเก่า (~26%)' : 'High Compatibility (~26% cheaper)';
+      formatDescription = lang === 'th'
+        ? 'ใช้ SegWit ครอบใน P2SH เหมาะสำหรับรับเงินจากระบบหรือเว็บเทรดที่ยังไม่รองรับ bc1q'
+        : 'Wrapped SegWit inside P2SH. Ideal for receiving from older platforms that do not yet support bc1q.';
+    } else if (activeBtcFormat === 'legacy_compressed') {
+      currentDisplayAddress = btcVariants.legacyCompressed;
+      currentFormatLabel = 'Legacy (P2PKH - 1...) Compressed';
+      currentDerivationPath = "m/44'/0'/0'/0/0";
+      currentScriptType = 'P2PKH (Compressed)';
+      currentFeeSavings = lang === 'th' ? 'รูปแบบดั้งเดิมสากล' : 'Universal Vintage Standard';
+      formatDescription = lang === 'th'
+        ? 'รูปแบบดั้งเดิมตั้งแต่ยุคแรกของ Satoshi รองรับได้ 100% บนทุกโปรแกรมในโลก'
+        : 'The original Bitcoin address format. Compatible with 100% of all software and hardware wallets.';
+    } else if (activeBtcFormat === 'legacy_uncompressed') {
+      currentDisplayAddress = btcVariants.legacyUncompressed;
+      currentFormatLabel = 'Legacy (P2PKH - 1...) Uncompressed';
+      currentDerivationPath = 'Vintage (Casascius)';
+      currentScriptType = 'P2PKH (Uncompressed)';
+      currentFeeSavings = lang === 'th' ? 'Paper Wallet โบราณ / Casascius' : 'Antique Paper Wallet / Casascius';
+      formatDescription = lang === 'th'
+        ? 'รูปแบบสำหรับ Paper Wallet โบราณ และเหรียญทางกายภาพ Casascius Physical Bitcoin (ปี 2011–2013)'
+        : 'Format used by antique physical Casascius Bitcoins and early 2011-2013 paper wallets.';
+    }
+  } else if (selectedChainId === 'BCH') {
+    if (activeBchFormat === 'cashaddr') {
+      currentDisplayAddress = btcVariants.bchCashAddr.startsWith('bitcoincash:') ? btcVariants.bchCashAddr : `bitcoincash:${btcVariants.bchCashAddr}`;
+      currentFormatLabel = 'CashAddr (BCH Standard)';
+      currentDerivationPath = "m/44'/145'/0'/0/0";
+      currentScriptType = 'P2PKH CashAddr';
+      formatDescription = lang === 'th' ? 'มาตรฐานทางการของ Bitcoin Cash ป้องกันการโอนผิดเข้าเครือข่าย BTC' : 'Official Bitcoin Cash standard preventing accidental sends to BTC.';
+    } else {
+      currentDisplayAddress = btcVariants.bchLegacy;
+      currentFormatLabel = 'Legacy (1...) Format';
+      currentDerivationPath = "m/44'/145'/0'/0/0";
+      currentScriptType = 'Legacy P2PKH';
+      formatDescription = lang === 'th' ? 'รูปแบบดั้งเดิม สำหรับระบบหรือกระเป๋าเก่าที่ไม่รองรับ CashAddr' : 'Original Legacy address format for older exchanges.';
+    }
+  }
+
   const getUriScheme = (chainId: ChainId): string => {
     switch (chainId) {
       case 'BTC': return 'bitcoin';
-      case 'ETH': return 'ethereum';
-      case 'SOL': return 'solana';
-      case 'BNB': return 'binance';
-      case 'TRX': return 'tron';
-      case 'DOGE': return 'dogecoin';
-      case 'LTC': return 'litecoin';
       case 'BCH': return 'bitcoincash';
-      case 'AVAX': return 'avalanche';
-      case 'POL': return 'polygon';
-      default: return 'crypto';
+      case 'BSV': return 'bitcoinsv';
+      case 'BTG': return 'bitcoingold';
+      case 'XEC': return 'ecash';
+      default: return 'bitcoin';
     }
   };
 
   const requestedAmount = parseFloat(requestedAmountStr) || 0;
   const uriScheme = getUriScheme(selectedChainId);
+  const cleanAddrForUri = currentDisplayAddress.startsWith('bitcoincash:')
+    ? currentDisplayAddress.replace('bitcoincash:', '')
+    : currentDisplayAddress;
+
   const qrUri = requestedAmount > 0
-    ? `${uriScheme}:${activeDerived.address}?amount=${requestedAmount}`
-    : `${uriScheme}:${activeDerived.address}`;
+    ? `${uriScheme}:${cleanAddrForUri}?amount=${requestedAmount}`
+    : `${uriScheme}:${cleanAddrForUri}`;
 
   const copyAddress = () => {
-    navigator.clipboard.writeText(activeDerived.address);
+    navigator.clipboard.writeText(currentDisplayAddress);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -100,15 +188,15 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
 
   return (
     <div className="space-y-3.5 pb-20 animate-in fade-in duration-300">
-      {/* Multi-Chain Selector Carousel */}
+      {/* Bitcoin & Fork Selector Carousel */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between px-1">
           <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-            <Layers className="w-3.5 h-3.5 text-indigo-400" />
-            <span>{lang === 'th' ? 'เลือกเครือข่ายรับเหรียญ' : 'Select Receiving Chain'}</span>
+            <Layers className="w-3.5 h-3.5 text-amber-400" />
+            <span>{lang === 'th' ? 'เลือกเหรียญรับโอน (Bitcoin & Forks)' : 'Select Asset (Bitcoin & Forks)'}</span>
           </span>
-          <span className="text-[10px] text-slate-400 font-mono">
-            {SUPPORTED_MULTI_CHAINS.length} Chains
+          <span className="text-[10px] text-amber-400 font-mono">
+            {SUPPORTED_MULTI_CHAINS.length} Coins
           </span>
         </div>
 
@@ -137,6 +225,130 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
         </div>
       </div>
 
+      {/* Bitcoin Address Format Selector Tabs */}
+      {selectedChainId === 'BTC' && (
+        <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-bold text-slate-200 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>{lang === 'th' ? 'ตัวเลือกรูปแบบที่อยู่รับ BTC (Address Formats)' : 'BTC Address Format Options'}</span>
+            </span>
+            <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+              5 Formats Available
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+            <button
+              type="button"
+              onClick={() => setActiveBtcFormat('native_segwit')}
+              className={`p-2 rounded-xl text-left border transition-all ${
+                activeBtcFormat === 'native_segwit'
+                  ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300 ring-1 ring-emerald-500/40'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+              }`}
+            >
+              <div className="text-[11px] font-bold truncate">Native SegWit</div>
+              <div className="text-[9.5px] font-mono text-slate-400">bc1q... (BIP-84)</div>
+              <div className="text-[9px] text-emerald-400 font-semibold mt-0.5">★ แนะนำ / ค่าขุดต่ำสุด</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveBtcFormat('taproot')}
+              className={`p-2 rounded-xl text-left border transition-all ${
+                activeBtcFormat === 'taproot'
+                  ? 'bg-purple-500/15 border-purple-500/50 text-purple-300 ring-1 ring-purple-500/40'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+              }`}
+            >
+              <div className="text-[11px] font-bold truncate">Taproot</div>
+              <div className="text-[9.5px] font-mono text-slate-400">bc1p... (BIP-86)</div>
+              <div className="text-[9px] text-purple-400 font-semibold mt-0.5">🔒 ส่วนตัวสูงสุด</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveBtcFormat('nested_segwit')}
+              className={`p-2 rounded-xl text-left border transition-all ${
+                activeBtcFormat === 'nested_segwit'
+                  ? 'bg-sky-500/15 border-sky-500/50 text-sky-300 ring-1 ring-sky-500/40'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+              }`}
+            >
+              <div className="text-[11px] font-bold truncate">Nested SegWit</div>
+              <div className="text-[9.5px] font-mono text-slate-400">3... (BIP-49)</div>
+              <div className="text-[9px] text-sky-400 font-semibold mt-0.5">รองรับเว็บเทรดเก่า</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveBtcFormat('legacy_compressed')}
+              className={`p-2 rounded-xl text-left border transition-all ${
+                activeBtcFormat === 'legacy_compressed'
+                  ? 'bg-amber-500/15 border-amber-500/50 text-amber-300 ring-1 ring-amber-500/40'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+              }`}
+            >
+              <div className="text-[11px] font-bold truncate">Legacy P2PKH</div>
+              <div className="text-[9.5px] font-mono text-slate-400">1... (Compressed)</div>
+              <div className="text-[9px] text-amber-400 font-semibold mt-0.5">ดั้งเดิมสากล</div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveBtcFormat('legacy_uncompressed')}
+              className={`p-2 rounded-xl text-left border transition-all col-span-2 sm:col-span-1 ${
+                activeBtcFormat === 'legacy_uncompressed'
+                  ? 'bg-orange-500/15 border-orange-500/50 text-orange-300 ring-1 ring-orange-500/40'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200 hover:bg-slate-850'
+              }`}
+            >
+              <div className="text-[11px] font-bold truncate">Legacy Uncompressed</div>
+              <div className="text-[9.5px] font-mono text-slate-400">1... (Antique)</div>
+              <div className="text-[9px] text-orange-400 font-semibold mt-0.5">Paper / Casascius</div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bitcoin Cash (BCH) Format Selector */}
+      {selectedChainId === 'BCH' && (
+        <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+          <div className="flex items-center justify-between text-xs font-bold text-slate-200">
+            <span>{lang === 'th' ? 'ตัวเลือกรูปแบบที่อยู่รับ BCH' : 'BCH Address Formats'}</span>
+            <span className="text-[10px] text-emerald-400 font-mono">CashAddr & Legacy</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setActiveBchFormat('cashaddr')}
+              className={`p-2.5 rounded-xl text-left border transition-all ${
+                activeBchFormat === 'cashaddr'
+                  ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <div className="text-xs font-bold">CashAddr (ทางการ)</div>
+              <div className="text-[10px] font-mono text-slate-400 truncate">bitcoincash:q...</div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveBchFormat('legacy')}
+              className={`p-2.5 rounded-xl text-left border transition-all ${
+                activeBchFormat === 'legacy'
+                  ? 'bg-amber-500/15 border-amber-500/50 text-amber-300'
+                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <div className="text-xs font-bold">Legacy (ดั้งเดิม)</div>
+              <div className="text-[10px] font-mono text-slate-400 truncate">1... (เข้ากันได้สูง)</div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Main Receiving QR & Details Card */}
       <div className="p-4 sm:p-5 rounded-3xl bg-slate-900 border border-slate-800/90 shadow-xl space-y-3.5 flex flex-col items-center text-center">
         {/* Header */}
         <div>
@@ -150,9 +362,9 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
             </span>
           </div>
           <p className="text-[11px] text-slate-400 mt-0.5">
-            {lang === 'th'
+            {formatDescription || (lang === 'th'
               ? `แสดง QR Code หรือแชร์ที่อยู่เพื่อรับสินทรัพย์บนเครือข่าย ${activeChainConfig.name}`
-              : `Show QR code or copy address to receive assets on ${activeChainConfig.name} network`}
+              : `Show QR code or copy address to receive assets on ${activeChainConfig.name} network`)}
           </p>
         </div>
 
@@ -164,17 +376,23 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
             className="w-44 h-44 sm:w-52 sm:h-52 object-contain"
           />
           <div className="mt-1.5 text-[9.5px] font-mono text-slate-800 font-bold tracking-tight uppercase">
-            {activeDerived.formatLabel || activeChainConfig.addressFormatName}
+            {currentFormatLabel}
           </div>
         </div>
 
         {/* Address Chip & Copy Button */}
         <div className="w-full bg-slate-950 p-3 rounded-2xl border border-slate-800 flex flex-col items-center gap-2">
-          <span className="text-[10.5px] text-slate-400 font-medium">
-            {t.accountNameLabel}: <strong className="text-slate-200">{account.name} ({activeChainConfig.symbol})</strong>
-          </span>
-          <p className="text-xs font-mono text-amber-400 font-bold break-all px-2 select-all leading-relaxed bg-slate-900/80 py-1.5 rounded-xl w-full border border-slate-800/80">
-            {activeDerived.address}
+          <div className="w-full flex items-center justify-between text-[10.5px]">
+            <span className="text-slate-400 font-medium">
+              {t.accountNameLabel}: <strong className="text-slate-200">{account.name}</strong>
+            </span>
+            <span className="text-amber-400 font-mono font-bold text-[10px]">
+              {currentFormatLabel}
+            </span>
+          </div>
+
+          <p className="text-xs font-mono text-amber-400 font-bold break-all px-2 select-all leading-relaxed bg-slate-900/80 py-2 rounded-xl w-full border border-slate-800/80">
+            {currentDisplayAddress}
           </p>
 
           <div className="w-full flex items-center gap-1.5">
@@ -196,7 +414,7 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
               )}
             </button>
             <a
-              href={`${activeChainConfig.explorerUrl}${activeDerived.address}`}
+              href={`${activeChainConfig.explorerUrl}${cleanAddrForUri}`}
               target="_blank"
               rel="noopener noreferrer"
               className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-slate-100 transition-colors border border-slate-700 flex items-center justify-center active:scale-95"
@@ -207,15 +425,19 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
           </div>
         </div>
 
-        {/* Derivation Path Details */}
-        <div className="w-full grid grid-cols-2 gap-2 text-left bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800 text-[10.5px]">
+        {/* Technical Specification Matrix */}
+        <div className="w-full grid grid-cols-2 sm:grid-cols-3 gap-2 text-left bg-slate-950/60 p-2.5 rounded-2xl border border-slate-800 text-[10.5px]">
           <div>
-            <span className="text-slate-500 block text-[9.5px]">Derivation Path:</span>
-            <span className="font-mono text-slate-300 font-semibold">{activeChainConfig.derivationPath}</span>
+            <span className="text-slate-500 block text-[9px]">Derivation Path:</span>
+            <span className="font-mono text-slate-300 font-semibold truncate block">{currentDerivationPath}</span>
           </div>
           <div>
-            <span className="text-slate-500 block text-[9.5px]">SLIP-0044 CoinType:</span>
-            <span className="font-mono text-indigo-400 font-semibold">{activeChainConfig.coinType}</span>
+            <span className="text-slate-500 block text-[9px]">Script Type:</span>
+            <span className="font-mono text-indigo-400 font-semibold truncate block">{currentScriptType}</span>
+          </div>
+          <div className="col-span-2 sm:col-span-1">
+            <span className="text-slate-500 block text-[9px]">Fee Efficiency:</span>
+            <span className="text-emerald-400 font-semibold text-[10px] truncate block">{currentFeeSavings}</span>
           </div>
         </div>
 
@@ -249,8 +471,8 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
           <ShieldCheck className="w-4 h-4 text-indigo-400 shrink-0" />
           <p className="text-[10.5px] text-indigo-300 leading-tight">
             {lang === 'th'
-              ? `ที่อยู่นี้ถูกคำนวณแบบแยกเครือข่ายอย่างสมบูรณ์ ปลอดภัยตามมาตรฐาน BIP-44/84 และ SLIP-0044`
-              : `Address deterministically derived per standard BIP-44/84 & SLIP-0044 multi-chain specifications.`}
+              ? `ที่อยู่นี้ถูกคำนวณแบบแยกเครือข่ายอย่างสมบูรณ์ ปลอดภัยตามมาตรฐาน BIP-44/84/86 และ SLIP-0044`
+              : `Address deterministically derived per standard BIP-44/84/86 & SLIP-0044 multi-chain specifications.`}
           </p>
         </div>
 
@@ -285,3 +507,4 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
     </div>
   );
 };
+

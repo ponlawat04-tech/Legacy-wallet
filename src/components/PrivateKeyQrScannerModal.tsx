@@ -24,11 +24,15 @@ import {
   Radio,
   CheckCircle2,
   Cpu,
-  Wallet
+  Wallet,
+  ExternalLink,
+  HelpCircle
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { Language, Currency } from '../types/wallet';
 import { detectKeyType, scanLegacyKeyAndForks } from '../utils/legacyForkScanner';
+import { acquireCameraStream, isRunningInIframe, openAppInNewTab, isAndroidWebViewOrApk } from '../utils/cameraHelper';
+import { AndroidApkCameraPermissionModal } from './AndroidApkCameraPermissionModal';
 
 export type KeyTypeDetection = ReturnType<typeof detectKeyType>;
 
@@ -52,6 +56,7 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [hasTorch, setHasTorch] = useState<boolean>(false);
   const [isTorchOn, setIsTorchOn] = useState<boolean>(false);
+  const [isApkGuideOpen, setIsApkGuideOpen] = useState<boolean>(false);
 
   const [scannedRaw, setScannedRaw] = useState<string | null>(null);
   const [keyInfo, setKeyInfo] = useState<KeyTypeDetection | null>(null);
@@ -73,6 +78,7 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
   const streamRef = useRef<MediaStream | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const cameraShutterInputRef = useRef<HTMLInputElement | null>(null);
 
   // Clean key strings (e.g. from bitcoin: URIs or spaces)
   const cleanExtractedKey = (raw: string): string => {
@@ -134,22 +140,13 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         setCameraError(
           lang === 'th'
-            ? 'เบราว์เซอร์ไม่รองรับการเปิดกล้องโดยตรง กรุณาใช้ปุ่มอัปโหลดรูปภาพ'
-            : 'Camera access not supported by browser. Please use image upload.'
+            ? 'เบราว์เซอร์ไม่รองรับการเปิดกล้องสด (แนะนำให้ใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ")'
+            : 'Live camera streaming is not supported. Please use "Camera Photo" capture.'
         );
         return;
       }
 
-      const constraints: MediaStreamConstraints = {
-        video: {
-          facingMode: cameraFacing,
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: false,
-      };
-
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const stream = await acquireCameraStream(cameraFacing);
       streamRef.current = stream;
 
       // Check for torch capability
@@ -164,6 +161,8 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute('playsinline', 'true');
+        videoRef.current.setAttribute('webkit-playsinline', 'true');
+        videoRef.current.muted = true;
         await videoRef.current.play();
         setIsCameraActive(true);
         startScanningLoop();
@@ -171,11 +170,37 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
     } catch (err: any) {
       console.warn('Camera stream error:', err);
       setIsCameraActive(false);
-      setCameraError(
-        lang === 'th'
-          ? 'ไม่สามารถเปิดกล้องได้ (อาจยังไม่อนุญาตสิทธิ์ หรือกล้องถูกใช้งานอยู่) กรุณาใช้ปุ่มอัปโหลดภาพ'
-          : 'Unable to access camera. Please allow permission or upload an image file.'
-      );
+      const isDenied = err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError';
+      const inIframe = isRunningInIframe();
+      const inApk = isAndroidWebViewOrApk();
+
+      if (isDenied) {
+        if (inApk) {
+          setCameraError(
+            lang === 'th'
+              ? 'ระบบแอนด์ดรอยด์ไม่พบสิทธิ์การเข้าใช้งานกล้องจาก APK (ต้องประกาศใน AndroidManifest.xml และตั้งค่า WebChromeClient.onPermissionRequest ใน MainActivity)'
+              : 'Android system did not find camera permission in APK. Requires AndroidManifest.xml declaration and WebChromeClient.onPermissionRequest.'
+          );
+        } else if (inIframe) {
+          setCameraError(
+            lang === 'th'
+              ? 'ระบบพรีวิว iFrame จำกัดการเข้าถึงกล้อง (แตะ "เปิดในแท็บใหม่" เพื่อเปิดกล้องสดบน Chrome หรือใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ")'
+              : 'Camera blocked by iFrame preview policy. Open in a new tab or use "Direct Camera Photo".'
+          );
+        } else {
+          setCameraError(
+            lang === 'th'
+              ? 'สิทธิ์กล้องถูกปฏิเสธ (โปรดแตะไอคอนแม่กุญแจ 🔒 ที่แถบที่อยู่ URL ด้านบน > เลือก "สิทธิ์" > อนุญาตกล้อง หรือใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ")'
+              : 'Camera permission denied. Tap lock icon 🔒 in browser URL bar to allow camera, or use "Camera Photo".'
+          );
+        }
+      } else {
+        setCameraError(
+          lang === 'th'
+            ? `ไม่สามารถเปิดกล้องได้: ${err?.message || 'อุปกรณ์ไม่พร้อมใช้งาน'} (สามารถใช้ปุ่ม "ถ่ายภาพด้วยกล้องมือถือ" หรืออัปโหลดภาพได้ทันที)`
+            : `Unable to access camera: ${err?.message || 'Device unavailable'}. Please use "Camera Photo" or file upload.`
+        );
+      }
     }
   };
 
@@ -364,14 +389,25 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 transition-colors shrink-0"
-            title="Close scanner"
-          >
-            <X className="w-4 h-4" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={() => setIsApkGuideOpen(true)}
+              className="px-2 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 text-[10px] font-bold flex items-center gap-1 transition-all"
+              title="Android APK Camera Permission Guide"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden sm:inline">{lang === 'th' ? 'คู่มือสิทธิ์กล้อง APK' : 'APK Camera Help'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 transition-colors shrink-0"
+              title="Close scanner"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Body */}
@@ -420,25 +456,62 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
 
                 {/* Camera Inactive / Error Fallback */}
                 {!isCameraActive && (
-                  <div className="p-6 text-center space-y-3 max-w-xs">
+                  <div className="p-5 text-center space-y-3 max-w-sm">
                     <div className="w-12 h-12 rounded-2xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 mx-auto">
                       <Camera className="w-6 h-6" />
                     </div>
                     <div>
                       <h4 className="text-xs font-bold text-slate-200">
-                        {lang === 'th' ? 'กล้องไม่พร้อมใช้งาน' : 'Camera Inactive'}
+                        {lang === 'th' ? 'กล้องสดไม่พร้อมใช้งาน' : 'Camera Inactive'}
                       </h4>
-                      <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-                        {cameraError || (lang === 'th' ? 'กรุณากดเปิดกล้อง หรือเลือกอัปโหลดรูปภาพ QR Code' : 'Please start camera or upload a QR image.')}
+                      <p className="text-[11px] text-slate-300 mt-1 leading-relaxed">
+                        {cameraError || (lang === 'th' ? 'กรุณากดเปิดกล้องสด หรือใช้ปุ่มถ่ายภาพด้วยกล้องมือถือ' : 'Please start camera or use direct camera photo.')}
                       </p>
                     </div>
-                    <button
-                      type="button"
-                      onClick={startCamera}
-                      className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-slate-950 font-bold text-xs transition-all shadow-md active:scale-95"
-                    >
-                      {lang === 'th' ? 'เปิดกล้องอีกครั้ง' : 'Start Camera'}
-                    </button>
+
+                    <div className="flex flex-col gap-2 pt-1">
+                      {/* Direct Android Native Camera Photo Shutter */}
+                      <button
+                        type="button"
+                        onClick={() => cameraShutterInputRef.current?.click()}
+                        className="w-full py-2.5 px-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md active:scale-95"
+                      >
+                        <Camera className="w-4 h-4" />
+                        <span>{lang === 'th' ? 'ถ่ายภาพด้วยกล้องมือถือ (Native Direct)' : 'Take Photo with Mobile Camera'}</span>
+                      </button>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={startCamera}
+                          className="flex-1 py-2 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all active:scale-95"
+                        >
+                          {lang === 'th' ? 'ลองเปิดกล้องสดใหม่' : 'Retry Live Camera'}
+                        </button>
+
+                        {isRunningInIframe() && (
+                          <button
+                            type="button"
+                            onClick={openAppInNewTab}
+                            className="py-2 px-2.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 text-xs font-semibold flex items-center gap-1 transition-all active:scale-95"
+                            title="Open in new window to grant Android camera permission"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>{lang === 'th' ? 'เปิดแท็บใหม่' : 'New Tab'}</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* APK Camera Permission Help Shortcut */}
+                      <button
+                        type="button"
+                        onClick={() => setIsApkGuideOpen(true)}
+                        className="w-full py-2 px-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+                      >
+                        <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                        <span>{lang === 'th' ? '📱 ติดปัญหาไม่พบสิทธิ์กล้องใน APK? ดูวิธีแก้' : '📱 APK Camera Permission Fix Guide'}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -471,31 +544,50 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
                 )}
               </div>
 
-              {/* Bottom Quick Action Triggers */}
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                />
+              {/* Hidden file inputs */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="hidden"
+              />
+              <input
+                ref={cameraShutterInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleImageUpload}
+                className="hidden"
+              />
+
+              {/* Bottom Quick Action Triggers (3 Options for 100% Android Success) */}
+              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={() => cameraShutterInputRef.current?.click()}
+                  className="p-2.5 sm:p-3 rounded-2xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-200 text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md text-center"
+                >
+                  <Camera className="w-4 h-4 text-purple-400 shrink-0" />
+                  <span className="truncate">{lang === 'th' ? 'ถ่ายภาพกล้อง' : 'Camera Photo'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="p-3 rounded-2xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md"
+                  className="p-2.5 sm:p-3 rounded-2xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md text-center"
                 >
-                  <Upload className="w-4 h-4 text-purple-400" />
-                  <span>{lang === 'th' ? 'อัปโหลดภาพ QR' : 'Upload QR Image'}</span>
+                  <Upload className="w-4 h-4 text-sky-400 shrink-0" />
+                  <span className="truncate">{lang === 'th' ? 'อัปโหลดภาพ' : 'Upload QR'}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setManualInputOpen(!manualInputOpen)}
-                  className="p-3 rounded-2xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md"
+                  className="p-2.5 sm:p-3 rounded-2xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md text-center"
                 >
-                  <FileText className="w-4 h-4 text-indigo-400" />
-                  <span>{lang === 'th' ? 'พิมพ์ / วางข้อความ' : 'Manual Paste'}</span>
+                  <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
+                  <span className="truncate">{lang === 'th' ? 'พิมพ์/วางข้อความ' : 'Manual Paste'}</span>
                 </button>
               </div>
 
@@ -659,6 +751,13 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
             </div>
           )}
         </div>
+
+        {/* Android APK Camera Permission Setup Guide Modal */}
+        <AndroidApkCameraPermissionModal
+          isOpen={isApkGuideOpen}
+          onClose={() => setIsApkGuideOpen(false)}
+          lang={lang}
+        />
       </div>
     </div>
   );

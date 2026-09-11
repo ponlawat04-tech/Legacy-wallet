@@ -1,4 +1,6 @@
-export type AddressType = 'native_segwit' | 'taproot' | 'legacy';
+import { SpvMerkleProof } from './spv';
+
+export type AddressType = 'native_segwit' | 'taproot' | 'legacy' | 'nested_segwit';
 
 export type Language = 'th' | 'en';
 
@@ -21,8 +23,8 @@ export interface WalletAccount {
   publicKey: string; // Public key for verifying & generating addresses
   balanceBtc: number; // Balance in BTC
   balanceSats: number; // Balance in Satoshis (1 BTC = 100,000,000 Sats)
-  keySource?: 'seed_phrase' | 'private_key'; // Type of secret origin
-  keyFormat?: string; // 12-words, 24-words, WIF, Hex
+  keySource?: 'seed_phrase' | 'private_key' | 'master_private_key'; // Type of secret origin
+  keyFormat?: string; // 12-words, 24-words, WIF, Hex, Master Key (xprv, zprv)
   color?: string; // Custom theme color identifier
   forkBalances?: HardForkCoinBalance[]; // Hard Fork coin holdings (BCH, BSV, BTG, XEC)
   isVaultSealed: boolean; // True when seed/private key has been permanently sealed
@@ -31,6 +33,9 @@ export interface WalletAccount {
   createdOffline: boolean; // Created during offline cold mode
   has25thWord?: boolean; // True if created/imported with 25th word (BIP39 Passphrase)
   passphraseHint?: string; // Optional hint for the 25th word
+  masterFingerprint?: string; // Root master fingerprint e.g. 73C5DA0A
+  extendedPublicKey?: string; // Corresponding xpub, zpub, ypub
+  masterKeyDepth?: number;    // Depth: 0 for root master key, 3 for account key
 }
 
 export interface ZeroExposureVault {
@@ -57,6 +62,8 @@ export interface Transaction {
   blockHeight?: number;
   status: 'completed' | 'pending' | 'broadcasted';
   note?: string;
+  spvVerified?: boolean;
+  spvProof?: SpvMerkleProof;
 }
 
 export interface FeeEstimates {
@@ -79,6 +86,8 @@ export interface MarketData {
   change24h: number;
   high24h: number;
   low24h: number;
+  high24hThb?: number;
+  low24hThb?: number;
   marketCapUsd: number;
   volume24hUsd: number;
   mempoolUnconfirmedTx: number;
