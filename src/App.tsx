@@ -767,6 +767,7 @@ export default function App() {
         storedPinHash={security.pinHash}
         duressPinHash={security.duressPinHash}
         antiScramble={security.antiScrambleKeypad}
+        biometricsEnabled={security.biometricsEnabled}
       />
 
       <MobileFrame
@@ -774,6 +775,41 @@ export default function App() {
         onTabChange={setActiveTab}
         lang={lang}
         airGapMode={airGapMode}
+        header={
+          <HeaderBar
+            account={account}
+            airGapMode={airGapMode}
+            onToggleAirGap={handleToggleAirGap}
+            currency={currency}
+            onToggleCurrency={() => setCurrency(currency === 'THB' ? 'USD' : 'THB')}
+            lang={lang}
+            onToggleLang={() => setLang(lang === 'th' ? 'en' : 'th')}
+            onOpenVaultModal={() => {
+              setQrScannedSecretForImport('');
+              setIsVaultModalOpen(true);
+            }}
+            onOpenWalletManager={() => setIsWalletManagerOpen(true)}
+            onOpenQrScanner={() => setIsPrivateKeyScannerOpen(true)}
+            onOpenSpvModal={() => setIsSpvModalOpen(true)}
+            onLockApp={() => setIsAppLocked(true)}
+            vaultFrozen={security.vaultFrozen}
+            onToggleFreeze={() => {
+              triggerPinProtection(() => {
+                const willFreeze = !security.vaultFrozen;
+                handleUpdateSecurity({
+                  vaultFrozen: willFreeze,
+                  frozenTimestamp: willFreeze ? Date.now() : null,
+                });
+                showToast(
+                  lang === 'th'
+                    ? (willFreeze ? '❄️ แช่แข็งกระเป๋าเรียบร้อยแล้ว การโอนออกถูกระงับทันที' : '🔓 ปลดล็อคแช่แข็งแล้ว พร้อมโอนเงินได้ตามปกติ')
+                    : (willFreeze ? '❄️ Vault Frozen! Outbound transfers locked.' : '🔓 Vault Unfrozen! Outbound transfers unlocked.'),
+                  'success'
+                );
+              });
+            }}
+          />
+        }
       >
         {/* Floating Toast Notification */}
         {toast && (
@@ -787,43 +823,8 @@ export default function App() {
           </div>
         )}
 
-        {/* Mobile Top Header */}
-        <HeaderBar
-          account={account}
-          airGapMode={airGapMode}
-          onToggleAirGap={handleToggleAirGap}
-          currency={currency}
-          onToggleCurrency={() => setCurrency(currency === 'THB' ? 'USD' : 'THB')}
-          lang={lang}
-          onToggleLang={() => setLang(lang === 'th' ? 'en' : 'th')}
-          onOpenVaultModal={() => {
-            setQrScannedSecretForImport('');
-            setIsVaultModalOpen(true);
-          }}
-          onOpenWalletManager={() => setIsWalletManagerOpen(true)}
-          onOpenQrScanner={() => setIsPrivateKeyScannerOpen(true)}
-          onOpenSpvModal={() => setIsSpvModalOpen(true)}
-          onLockApp={() => setIsAppLocked(true)}
-          vaultFrozen={security.vaultFrozen}
-          onToggleFreeze={() => {
-            triggerPinProtection(() => {
-              const willFreeze = !security.vaultFrozen;
-              handleUpdateSecurity({
-                vaultFrozen: willFreeze,
-                frozenTimestamp: willFreeze ? Date.now() : null,
-              });
-              showToast(
-                lang === 'th'
-                  ? (willFreeze ? '❄️ แช่แข็งกระเป๋าเรียบร้อยแล้ว การโอนออกถูกระงับทันที' : '🔓 ปลดล็อคแช่แข็งแล้ว พร้อมโอนเงินได้ตามปกติ')
-                  : (willFreeze ? '❄️ Vault Frozen! Outbound transfers locked.' : '🔓 Vault Unfrozen! Outbound transfers unlocked.'),
-                'success'
-              );
-            });
-          }}
-        />
-
         {/* Main Tab Render */}
-        <div className="pt-3">
+        <div className="w-full">
           {activeTab === 'home' && (
             <HomeTab
               account={account}
@@ -974,6 +975,7 @@ export default function App() {
           storedPinHash={security.pinHash}
           duressPinHash={security.duressPinHash}
           antiScramble={security.antiScrambleKeypad}
+          biometricsEnabled={security.biometricsEnabled}
         />
 
         {/* Verify PIN Before Opening PIN Options Menu */}
@@ -992,6 +994,7 @@ export default function App() {
           storedPinHash={security.pinHash}
           duressPinHash={security.duressPinHash}
           antiScramble={security.antiScrambleKeypad}
+          biometricsEnabled={security.biometricsEnabled}
           titleOverride={t.enterOldPinTitle}
           subtitleOverride={t.enterOldPinDesc}
         />
@@ -1061,6 +1064,7 @@ export default function App() {
           storedPinHash={security.pinHash}
           duressPinHash={security.duressPinHash}
           antiScramble={security.antiScrambleKeypad}
+          biometricsEnabled={security.biometricsEnabled}
           titleOverride={lang === 'th' ? 'กรอกรหัส PIN หลักเพื่อกลับสู่กระเป๋าจริง' : 'Enter Main PIN to Exit Decoy Mode'}
         />
 

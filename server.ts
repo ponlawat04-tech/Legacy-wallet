@@ -12,7 +12,7 @@ async function startServer() {
   app.get("/api/health", (_req, res) => {
     res.json({
       status: "ok",
-      version: "3.5.0",
+      version: "3.6.0",
       sovereign: true,
       timestamp: new Date().toISOString(),
     });

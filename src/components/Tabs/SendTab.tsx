@@ -19,7 +19,8 @@ import {
   Key,
   Zap,
   Snowflake,
-  Unlock
+  Unlock,
+  Fingerprint
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { Currency, FeeEstimates, Language, MarketData, SecuritySettings, Transaction, WalletAccount } from '../../types/wallet';
@@ -827,8 +828,8 @@ export const SendTab: React.FC<SendTabProps> = ({
                 : 'bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-slate-950 shadow-indigo-500/20 sm:col-span-2'
             }`}
           >
-            <Lock className="w-4 h-4" />
-            <span>{lang === 'th' ? `ใส่รหัส PIN เพื่อยืนยันโอน ${activeChain.symbol}` : `Confirm Send ${activeChain.symbol}`}</span>
+            <Fingerprint className="w-4 h-4" />
+            <span>{lang === 'th' ? `ยืนยัน PIN / สแกนนิ้ว เพื่อโอน ${activeChain.symbol}` : `Authorize & Send ${activeChain.symbol}`}</span>
           </button>
         </div>
       </div>

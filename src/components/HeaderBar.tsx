@@ -41,7 +41,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   const isKey = account.keySource === 'private_key';
 
   return (
-    <header className="sticky top-0 z-30 bg-slate-950/90 backdrop-blur-xl border-b border-slate-800/80 px-3.5 py-2.5 text-slate-100 flex items-center justify-between gap-2">
+    <header className="w-full bg-slate-950/95 backdrop-blur-xl border-b border-slate-800/90 px-3 sm:px-4 py-2 sm:py-2.5 text-slate-100 flex items-center justify-between gap-2 shrink-0 z-30 select-none shadow-md">
       {/* Brand & Account Name (Clickable to switch wallet) */}
       <button
         type="button"

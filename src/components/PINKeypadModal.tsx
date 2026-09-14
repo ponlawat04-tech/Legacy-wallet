@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Lock, Delete, ShieldAlert, CheckCircle2, Eye, EyeOff, Info, RotateCcw } from 'lucide-react';
+import { Lock, Delete, ShieldAlert, CheckCircle2, Eye, EyeOff, Info, RotateCcw, Fingerprint } from 'lucide-react';
 import { Language } from '../types/wallet';
 import { i18n } from '../utils/i18n';
 import { triggerHaptic } from '../utils/haptics';
+import { authenticateBiometrics } from '../utils/webAuthn';
 
 interface PINKeypadModalProps {
   isOpen: boolean;
@@ -12,6 +13,7 @@ interface PINKeypadModalProps {
   storedPinHash: string | null;
   duressPinHash: string | null;
   antiScramble: boolean;
+  biometricsEnabled?: boolean;
   titleOverride?: string;
   subtitleOverride?: string;
   isSettingNewPin?: boolean;
@@ -27,6 +29,7 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
   storedPinHash,
   duressPinHash,
   antiScramble,
+  biometricsEnabled = true,
   titleOverride,
   subtitleOverride,
   isSettingNewPin = false,
@@ -39,6 +42,7 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [keypadOrder, setKeypadOrder] = useState<number[]>([1, 2, 3, 4, 5, 6, 7, 8, 9, 0]);
   const [showNumbers, setShowNumbers] = useState<boolean>(true);
+  const [isAuthenticatingBiometric, setIsAuthenticatingBiometric] = useState<boolean>(false);
 
   const t = i18n[lang];
 
@@ -47,6 +51,7 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
       setPin('');
       setConfirmPin('');
       setError(null);
+      setIsAuthenticatingBiometric(false);
       if (skipOldPin && (isSettingNewPin || isSettingDecoyPin)) {
         setStep('create');
       } else if ((isSettingNewPin || isSettingDecoyPin) && storedPinHash) {
@@ -59,6 +64,30 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
       scrambleKeypad();
     }
   }, [isOpen, isSettingNewPin, isSettingDecoyPin, storedPinHash, skipOldPin]);
+
+  const handleBiometricAuth = async () => {
+    setError(null);
+    setIsAuthenticatingBiometric(true);
+    triggerHaptic('light');
+
+    try {
+      const res = await authenticateBiometrics('Authorize transaction or vault unlock');
+      if (res.success) {
+        triggerHaptic('success');
+        setIsAuthenticatingBiometric(false);
+        const resolvedPin = storedPinHash ? atob(storedPinHash) : '123456';
+        onSuccess(resolvedPin, false);
+      } else {
+        triggerHaptic('error');
+        setIsAuthenticatingBiometric(false);
+        setError(res.error || (lang === 'th' ? 'การยืนยันตัวตนด้วยไบโอเมตริกซ์ไม่สำเร็จ' : 'Biometric authentication failed'));
+      }
+    } catch (err: any) {
+      triggerHaptic('error');
+      setIsAuthenticatingBiometric(false);
+      setError(err?.message || (lang === 'th' ? 'เกิดข้อผิดพลาดในการยืนยันตัวตน' : 'Authentication error'));
+    }
+  };
 
   const scrambleKeypad = () => {
     if (antiScramble) {
@@ -240,7 +269,7 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
         </p>
 
         {/* Default PIN Hint Banner */}
-        <div className="w-full bg-amber-500/10 border border-amber-500/30 rounded-2xl p-2.5 text-[11px] font-mono text-amber-300 text-center mb-5 flex items-center justify-center gap-2 shadow-inner">
+        <div className="w-full bg-amber-500/10 border border-amber-500/30 rounded-2xl p-2.5 text-[11px] font-mono text-amber-300 text-center mb-4 flex items-center justify-center gap-2 shadow-inner">
           <Info className="w-4 h-4 text-amber-400 shrink-0" />
           <span>
             {lang === 'th'
@@ -248,6 +277,23 @@ export const PINKeypadModal: React.FC<PINKeypadModalProps> = ({
               : 'Default PIN: 123456 (Duress: 999999)'}
           </span>
         </div>
+
+        {/* WebAuthn Biometrics Quick Verification Action */}
+        {step === 'enter' && biometricsEnabled && (
+          <button
+            type="button"
+            onClick={handleBiometricAuth}
+            disabled={isAuthenticatingBiometric}
+            className="w-full py-2.5 px-3 mb-4 bg-gradient-to-r from-emerald-950/70 via-slate-900 to-teal-950/70 hover:from-emerald-900/80 hover:to-teal-900/80 border border-emerald-500/40 rounded-2xl text-emerald-300 text-xs font-bold flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-500/10 active:scale-95 cursor-pointer disabled:opacity-50"
+          >
+            <Fingerprint className={`w-4 h-4 text-emerald-400 shrink-0 ${isAuthenticatingBiometric ? 'animate-pulse' : ''}`} />
+            <span>
+              {isAuthenticatingBiometric
+                ? (lang === 'th' ? 'กำลังยืนยันตัวตนด้วยไบโอเมตริกซ์...' : 'Authenticating with Biometrics...')
+                : (lang === 'th' ? 'ยืนยันด้วย WebAuthn (Touch ID / Face ID)' : 'Verify with WebAuthn (Touch ID / Face ID)')}
+            </span>
+          </button>
+        )}
 
         {/* PIN Indicators */}
         <div className="flex items-center justify-center gap-3 mb-6">

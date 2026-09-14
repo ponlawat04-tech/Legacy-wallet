@@ -26,7 +26,8 @@ import {
   AlertCircle,
   Snowflake,
   Unlock,
-  Smartphone
+  Smartphone,
+  Fingerprint
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { Currency, Language, MarketData, SecuritySettings, Transaction, WalletAccount } from '../../types/wallet';
@@ -879,8 +880,8 @@ export const AirGapSignTab: React.FC<AirGapSignTabProps> = ({
                 onClick={handleSignOffline}
                 className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-bold text-xs shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 transition-all active:scale-95"
               >
-                <Lock className="w-4 h-4" />
-                <span>{lang === 'th' ? 'ยืนยันรหัส PIN และเซ็นธุรกรรมออฟไลน์' : 'Authorize PIN & Sign Offline'}</span>
+                <Fingerprint className="w-4 h-4" />
+                <span>{lang === 'th' ? 'ยืนยัน PIN / สแกนนิ้ว และเซ็นธุรกรรมออฟไลน์' : 'Authorize PIN / Biometrics & Sign Offline'}</span>
               </button>
             ) : (
               /* Signed Result View (High-Density QR Code to return to Watch-Only) */

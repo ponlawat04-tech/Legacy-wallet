@@ -11,6 +11,7 @@ interface AppLockScreenProps {
   storedPinHash: string | null;
   duressPinHash: string | null;
   antiScramble: boolean;
+  biometricsEnabled?: boolean;
 }
 
 export const AppLockScreen: React.FC<AppLockScreenProps> = ({
@@ -20,6 +21,7 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({
   storedPinHash,
   duressPinHash,
   antiScramble,
+  biometricsEnabled = true,
 }) => {
   if (!isLocked) return null;
 
@@ -62,6 +64,7 @@ export const AppLockScreen: React.FC<AppLockScreenProps> = ({
         storedPinHash={storedPinHash}
         duressPinHash={duressPinHash}
         antiScramble={antiScramble}
+        biometricsEnabled={biometricsEnabled}
         titleOverride={t.enterPinTitle}
       />
     </div>

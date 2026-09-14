@@ -1,12 +1,23 @@
-export const APP_VERSION = '3.5.0';
-export const APP_VERSION_TAG = 'v3.5.0';
+export const APP_VERSION = '3.6.0';
+export const APP_VERSION_TAG = 'v3.6.0';
 export const APP_BUILD_DATE = '2026-09-14';
-export const APP_RELEASE_NAME = 'Legacy wallet • Pure Sovereign Vault & Zero-AI Security Core';
+export const APP_RELEASE_NAME = 'Legacy wallet • Sovereign Vault & Edge-to-Edge Mobile UX';
 export const APP_RELEASE_NOTES = [
+  {
+    version: 'v3.6.0',
+    date: '2026-09-14',
+    highlights: [
+      'Zero-Gap Pinned Top Header: Pinned HeaderBar flush to the top edge of the viewport with zero margin, allowing wallet contents to glide seamlessly underneath with rich backdrop-blur',
+      'Mobile Security Center Overhaul: Redesigned Security Center hero card and 10 Security Invariants with dedicated row enclosures, preventing Thai typography wrapping glitches and text clipping',
+      'Adaptive Mobile Viewport & Ergonomics: Full-width responsive audit action triggers and removed artificial status bar simulations to maximize screen real-estate for wallet controls',
+      'Cryptographic & Node Audit Alignment: Streamlined responsive layout for Node Security Audit and Hardware Cryptography Vector verification cards',
+    ],
+  },
   {
     version: 'v3.5.0',
     date: '2026-09-14',
     highlights: [
+      'Web Authentication API (WebAuthn) Biometrics: Integrated Touch ID, Face ID, Windows Hello, and Passkey hardware credentials to replace or augment PIN entry for effortless vault unlocking and transaction signing',
       'Complete AI Decommissioning: Purged all AI endpoints, SDK dependencies, and external LLM interactions to ensure 100% deterministic, self-sovereign cold vault operation without external third-party model reliance',
       'Local Deterministic Cryptographic Audit: Integrated an offline, zero-leakage security audit engine natively validating PBKDF2 (100k rounds), AES-256-GCM memory bounds, BIP-174 PSBT offline signing, and SIGHASH_FORKID replay protection',
       '24h Market High/Low Currency-Aware Engine: Real-time multi-source ticker (Binance & Kraken) with live THB/USD rate conversion and currency formatting',
