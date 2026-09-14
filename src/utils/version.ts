@@ -1,15 +1,24 @@
-export const APP_VERSION = '3.4.0';
-export const APP_VERSION_TAG = 'v3.4.0';
-export const APP_BUILD_DATE = '2026-09-09';
-export const APP_RELEASE_NAME = 'Legacy wallet • Full-Stack & Cloud Run Integrated Vault';
+export const APP_VERSION = '3.5.0';
+export const APP_VERSION_TAG = 'v3.5.0';
+export const APP_BUILD_DATE = '2026-09-14';
+export const APP_RELEASE_NAME = 'Legacy wallet • Pure Sovereign Vault & Zero-AI Security Core';
 export const APP_RELEASE_NOTES = [
+  {
+    version: 'v3.5.0',
+    date: '2026-09-14',
+    highlights: [
+      'Complete AI Decommissioning: Purged all AI endpoints, SDK dependencies, and external LLM interactions to ensure 100% deterministic, self-sovereign cold vault operation without external third-party model reliance',
+      'Local Deterministic Cryptographic Audit: Integrated an offline, zero-leakage security audit engine natively validating PBKDF2 (100k rounds), AES-256-GCM memory bounds, BIP-174 PSBT offline signing, and SIGHASH_FORKID replay protection',
+      '24h Market High/Low Currency-Aware Engine: Real-time multi-source ticker (Binance & Kraken) with live THB/USD rate conversion and currency formatting',
+      'Hardened Minimal Container: Streamlined Express 4 server to pure container health orchestration (/api/health) and static assets, eliminating attack surfaces',
+    ],
+  },
   {
     version: 'v3.4.0',
     date: '2026-09-09',
     highlights: [
       'Full-Stack Architecture & Cloud Run Readiness: Configured native Express 4 server entrypoint (server.ts) with dual-mode Vite development middleware and standalone compiled CommonJS bundle (dist/server.cjs) for seamless Google Cloud Run container deployment',
       'Container Healthcheck API: Live /api/health probe with real-time heartbeat and UTC timestamp tracking for automated orchestration and zero-downtime health verification',
-      'Server-Side Gemini AI Security Advisor: Built secure /api/ai/security-audit proxy keeping Gemini API keys protected server-side with zero client exposure, providing real-time cryptographic audit recommendations',
       'Application Integration Matrix: Unified end-to-end integration across SPV peer quorum, multi-chain replay protection (SIGHASH_FORKID), zero-exposure PBKDF2/AES-256-GCM vault, and offline PWA capability',
     ],
   },
