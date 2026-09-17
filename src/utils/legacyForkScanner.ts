@@ -8,6 +8,8 @@ import {
   deriveHdPath,
   deriveChildFromExtendedKey,
   encodeCashAddress,
+  parseExtendedPublicKey,
+  deriveAddressesFromExtendedPublicKey,
 } from './bitcoinKeyEngine';
 
 // International Standard Legacy Private Key & Hard Fork Multi-Chain Engine
@@ -49,7 +51,7 @@ export interface ScannedHardForkCoinInfo {
 export interface KeyScanResult {
   inputSecretMasked: string;
   rawSecret: string;
-  keyType: 'wif_compressed' | 'wif_uncompressed' | 'hex_64' | 'casascius_minikey' | 'seed_phrase' | 'master_private_key';
+  keyType: 'wif_compressed' | 'wif_uncompressed' | 'hex_64' | 'casascius_minikey' | 'seed_phrase' | 'master_private_key' | 'extended_public_key';
   keyTypeLabel: string;
   fingerprint: string;
   btcAddresses: ScannedBtcAddressInfo[];
@@ -60,6 +62,7 @@ export interface KeyScanResult {
   totalForkValueUsd: number;
   grandTotalValueUsd: number;
   scanTimestamp: number;
+  isWatchOnly?: boolean;
 }
 
 /**
@@ -168,18 +171,37 @@ function encodeBase58Check(version: number, payload: Uint8Array, checksum: Uint8
  * Detect Key Input Format
  */
 export function detectKeyType(rawInput: string): {
-  type: 'wif_compressed' | 'wif_uncompressed' | 'hex_64' | 'casascius_minikey' | 'seed_phrase' | 'master_private_key' | 'invalid';
+  type: 'wif_compressed' | 'wif_uncompressed' | 'hex_64' | 'casascius_minikey' | 'seed_phrase' | 'master_private_key' | 'extended_public_key' | 'invalid';
   label: string;
   isValid: boolean;
 } {
-  const clean = rawInput.trim();
+  let clean = rawInput.trim();
   if (!clean) return { type: 'invalid', label: 'Empty Input', isValid: false };
 
+  // Auto-correct common "pup" typo for extended public keys (e.g. xpup -> xpub, zpup -> zpub)
+  if (/^xpup/i.test(clean)) clean = 'xpub' + clean.slice(4);
+  else if (/^zpup/i.test(clean)) clean = 'zpub' + clean.slice(4);
+  else if (/^ypup/i.test(clean)) clean = 'ypub' + clean.slice(4);
+  else if (/^tpup/i.test(clean)) clean = 'tpub' + clean.slice(4);
+
+  // Extended Public Key check (xpub, ypub, zpub, tpub, upub, vpub)
+  if (['xpub', 'ypub', 'zpub', 'tpub', 'upub', 'vpub'].some(p => clean.toLowerCase().startsWith(p))) {
+    const extPub = parseExtendedPublicKey(clean);
+    if (extPub) {
+      return {
+        type: 'extended_public_key',
+        label: `${extPub.formatLabel} (${extPub.prefix}) - Watch-Only Node Derivation`,
+        isValid: true,
+      };
+    }
+  }
+
   const words = clean.split(/\s+/);
-  if ((words.length === 12 || words.length === 24) && words.every(w => BIP39_ENGLISH_WORDS.includes(w.toLowerCase()))) {
+  const validLengths = [12, 15, 16, 18, 20, 21, 24];
+  if (validLengths.includes(words.length) && words.every(w => BIP39_ENGLISH_WORDS.includes(w.toLowerCase()))) {
     return {
       type: 'seed_phrase',
-      label: `BIP-39 Mnemonic Seed (${words.length} words)`,
+      label: `Mnemonic Seed (${words.length} words)`,
       isValid: true,
     };
   }
@@ -441,7 +463,29 @@ export async function scanLegacyKeyAndForks(
     isCompressed: boolean;
   }> = [];
 
-  if (isSeed) {
+  if (detection.type === 'extended_public_key') {
+    const derivedRes = deriveAddressesFromExtendedPublicKey(cleanInput, 6, 2);
+    fingerprint = derivedRes.keyDetails.fingerprint || derivedRes.keyDetails.parentFingerprint || 'XPUB-001';
+
+    const firstAddr = derivedRes.addresses[0];
+    bchDerived = firstAddr?.bchCashAddr || '';
+    bsvDerived = firstAddr?.bsvAddr || '';
+    btgDerived = firstAddr?.btgAddr || '';
+    legacyBaseAddr = firstAddr?.address || '';
+
+    btcAddressTemplates = derivedRes.addresses.map((addr) => ({
+      format: (addr.addressType === 'native_segwit'
+        ? 'native_segwit'
+        : addr.addressType === 'nested_segwit'
+        ? 'nested_p2sh'
+        : 'legacy_p2pkh') as 'legacy_p2pkh' | 'nested_p2sh' | 'native_segwit',
+      formatLabel: `${derivedRes.keyDetails.prefix.toUpperCase()} [${addr.path}] - ${addr.formatLabel}`,
+      derivationPath: addr.path,
+      address: addr.address,
+      publicKey: addr.pubKeyHex,
+      isCompressed: true,
+    }));
+  } else if (isSeed) {
     const seedBytes = deriveBip39SeedSync(cleanInput, cleanPassphrase);
     const master = deriveMasterKeyFromSeed(seedBytes);
 
@@ -860,5 +904,6 @@ export async function scanLegacyKeyAndForks(
     totalForkValueUsd,
     grandTotalValueUsd,
     scanTimestamp: Date.now(),
+    isWatchOnly: detection.type === 'extended_public_key',
   };
 }

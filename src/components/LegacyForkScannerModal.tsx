@@ -31,7 +31,8 @@ import {
   ChevronDown,
   ChevronUp,
   ArrowDownLeft,
-  ArrowUpRight
+  ArrowUpRight,
+  Clipboard
 } from 'lucide-react';
 import { Currency, HardForkCoinBalance, Language, MarketData, Transaction } from '../types/wallet';
 import {
@@ -41,6 +42,7 @@ import {
   ScannedBtcAddressInfo,
   ScannedHardForkCoinInfo
 } from '../utils/legacyForkScanner';
+import { cleanAndNormalizeKeyString, readClipboardSafely } from '../utils/clipboard';
 import { fetchRealAddressTransactions } from '../utils/blockchainApi';
 
 interface LegacyForkScannerModalProps {
@@ -105,6 +107,10 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
     {
       label: lang === 'th' ? 'SegWit Master (zprv)' : 'Native SegWit (zprv)',
       key: 'zprvAWgYBBk7JR8GjzqSzmunMCS7dAbwpYTCs1YUMDXqduMA5JFHZ3iX5s2UkAR6vBdcCYYa1S5o1fVLrKsrnpCQ4WpUd6aVUWP1bS2Yy5DoaKv',
+    },
+    {
+      label: lang === 'th' ? 'xpup/zpub Watch' : 'zpub / xpup Watch',
+      key: 'zpub6rFR7y4Q2AijBEqTUquhVz398htDFrtymD9xYYfG1m4wAcvPhXNfE3EfH1r1ADqtfSdVCToUG868RvUUkgDKf31mGDtKsAYz2oz2AGutZYs',
     },
   ];
 
@@ -275,6 +281,15 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
     });
   };
 
+  const handlePasteFromClipboard = async () => {
+    const result = await readClipboardSafely();
+    if (result.text) {
+      const clean = cleanAndNormalizeKeyString(result.text);
+      setInputKey(clean);
+      setErrorMsg(null);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-200"
@@ -340,6 +355,15 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
               </label>
 
               <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePasteFromClipboard}
+                  className="text-[11px] text-amber-300 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 px-2 py-0.5 rounded-lg border border-amber-500/40 flex items-center gap-1 font-semibold transition-all active:scale-95 shadow-sm"
+                  title={lang === 'th' ? 'กดวาง Key จากคลิปบอร์ด' : 'Paste Key from Clipboard'}
+                >
+                  <Clipboard className="w-3 h-3 text-amber-300" />
+                  <span>{lang === 'th' ? '📋 วาง' : '📋 Paste'}</span>
+                </button>
                 {onOpenQrScanner && (
                   <button
                     type="button"
@@ -347,7 +371,7 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
                     className="text-[11px] text-purple-300 hover:text-purple-200 bg-purple-500/20 hover:bg-purple-500/30 px-2 py-0.5 rounded-lg border border-purple-500/40 flex items-center gap-1 transition-all active:scale-95 shadow-sm"
                   >
                     <Camera className="w-3 h-3 text-purple-300" />
-                    <span>{lang === 'th' ? 'สแกน QR Code' : 'Scan QR'}</span>
+                    <span>{lang === 'th' ? 'สแกน QR' : 'Scan QR'}</span>
                   </button>
                 )}
                 {inputKey && (
@@ -377,6 +401,15 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
                 onChange={e => {
                   setInputKey(e.target.value);
                   setErrorMsg(null);
+                }}
+                onPaste={e => {
+                  const pasted = e.clipboardData.getData('text');
+                  if (pasted) {
+                    e.preventDefault();
+                    const clean = cleanAndNormalizeKeyString(pasted);
+                    setInputKey(clean);
+                    setErrorMsg(null);
+                  }
                 }}
                 rows={2}
                 autoComplete="off"
@@ -498,10 +531,15 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
               <div className="rounded-2xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 border border-slate-700/80 p-4 shadow-xl">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                    <span className={`w-2 h-2 rounded-full ${scanResult.isWatchOnly ? 'bg-cyan-400' : 'bg-emerald-400'} animate-pulse`} />
                     <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                       {lang === 'th' ? 'ผลการตรวจสอบกระเป๋า' : 'Audit Summary'}
                     </span>
+                    {scanResult.isWatchOnly && (
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 uppercase">
+                        Watch-Only (Public Key)
+                      </span>
+                    )}
                   </div>
                   <span className="text-[10px] font-mono text-slate-400 bg-slate-800 px-2 py-0.5 rounded-md border border-slate-700">
                     FP: {scanResult.fingerprint}
@@ -993,28 +1031,44 @@ export const LegacyForkScannerModal: React.FC<LegacyForkScannerModalProps> = ({
                     </div>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleExecuteSweep}
-                    disabled={isSweeping || scanResult.totalBtcSats <= 0}
-                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all active:scale-98"
-                  >
-                    {isSweeping ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
-                        <span>{lang === 'th' ? 'กำลังทำรายการกวาดเหรียญ (Sweeping...)' : 'Sweeping UTXOs...'}</span>
-                      </>
-                    ) : (
-                      <>
-                        <Send className="w-4 h-4" />
-                        <span>
+                  {scanResult.isWatchOnly ? (
+                    <div className="p-3.5 rounded-2xl bg-cyan-950/40 border border-cyan-500/40 text-cyan-200 text-xs flex items-start gap-2.5">
+                      <Lock className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-bold text-cyan-300">
+                          {lang === 'th' ? 'โหมด Watch-Only (Extended Public Key)' : 'Watch-Only Extended Public Key'}
+                        </div>
+                        <div className="text-[11px] text-cyan-200/80 mt-1 leading-relaxed">
                           {lang === 'th'
-                            ? `ยืนยันกวาดเหรียญเข้าสู่ Cold Vault (${scanResult.totalBtcAmount.toFixed(8)} BTC)`
-                            : `Confirm Sweep to Vault (${scanResult.totalBtcAmount.toFixed(8)} BTC)`}
-                        </span>
-                      </>
-                    )}
-                  </button>
+                            ? 'กุญแจ xpub / zpub / ypub บรรจุเฉพาะข้อมูล Public Key สำหรับตรวจสอบประวัติและยอดเงิน ไม่สามารถเซ็นโอนเหรียญ (Sweep) ได้โดยตรง หากต้องการย้ายเหรียญ กรุณาใช้ Private Key (WIF, Seed คำศัพท์ หรือ xprv) หรือใช้โหมด Air-Gap Offline Signer'
+                            : 'This extended public key provides read-only tracking. Sweeping requires the private key (WIF, Seed Phrase, or Master Private Key) or signing via an air-gapped hardware wallet.'}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleExecuteSweep}
+                      disabled={isSweeping || scanResult.totalBtcSats <= 0}
+                      className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 font-black text-xs sm:text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all active:scale-98"
+                    >
+                      {isSweeping ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                          <span>{lang === 'th' ? 'กำลังทำรายการกวาดเหรียญ (Sweeping...)' : 'Sweeping UTXOs...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4" />
+                          <span>
+                            {lang === 'th'
+                              ? `ยืนยันกวาดเหรียญเข้าสู่ Cold Vault (${scanResult.totalBtcAmount.toFixed(8)} BTC)`
+                              : `Confirm Sweep to Vault (${scanResult.totalBtcAmount.toFixed(8)} BTC)`}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  )}
                 </div>
               )}
 

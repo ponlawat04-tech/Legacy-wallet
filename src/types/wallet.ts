@@ -24,7 +24,11 @@ export interface WalletAccount {
   balanceBtc: number; // Balance in BTC
   balanceSats: number; // Balance in Satoshis (1 BTC = 100,000,000 Sats)
   keySource?: 'seed_phrase' | 'private_key' | 'master_private_key'; // Type of secret origin
-  keyFormat?: string; // 12-words, 24-words, WIF, Hex, Master Key (xprv, zprv)
+  keyFormat?: string; // 12-words, 18-words, 24-words, WIF, Hex, Master Key (xprv, zprv), BIP-85, etc.
+  seedWordCount?: number; // Word count: 12, 15, 16, 18, 20, 21, 24
+  isBip85Child?: boolean; // True if derived via BIP-85 deterministic child engine
+  bip85ChildIndex?: number; // BIP-85 child index
+  isShamirShare?: boolean; // True if derived from SLIP-0039 Shamir Secret Sharing
   color?: string; // Custom theme color identifier
   forkBalances?: HardForkCoinBalance[]; // Hard Fork coin holdings (BCH, BSV, BTG, XEC)
   isVaultSealed: boolean; // True when seed/private key has been permanently sealed

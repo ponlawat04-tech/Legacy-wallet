@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ActiveTab, Currency, Language, MarketData, SecuritySettings, Transaction, WalletAccount, ZeroExposureVault } from './types/wallet';
+import { ActiveTab, AddressType, Currency, Language, MarketData, SecuritySettings, Transaction, WalletAccount, ZeroExposureVault } from './types/wallet';
 import { INITIAL_MARKET_DATA, fetchLiveMarketData } from './utils/mockMarket';
 import { fetchRealAddressData, fetchRealAddressTransactions } from './utils/blockchainApi';
 import { MobileFrame } from './components/MobileFrame';
@@ -21,7 +21,14 @@ import { WalletManagerModal } from './components/WalletManagerModal';
 import { LegacyForkScannerModal } from './components/LegacyForkScannerModal';
 import { PrivateKeyQrScannerModal } from './components/PrivateKeyQrScannerModal';
 import { SpvNodeStatusModal } from './components/SpvNodeStatusModal';
+import { MultiWalletAuditModal } from './components/MultiWalletAuditModal';
+import { AutoBackupModal } from './components/AutoBackupModal';
+import { RawBackupMigratorModal } from './components/RawBackupMigratorModal';
+import { AddressTypeSwitchModal } from './components/AddressTypeSwitchModal';
+import { NextGenSystemHubModal } from './components/NextGenSystemHubModal';
+import { BackupPayload, createBackupSnapshot } from './utils/autoBackup';
 import { spvEngine } from './utils/spv/spvEngine';
+import { sovereignOrchestrator } from './utils/sovereignOS/sovereignOrchestrator';
 import { CheckCircle2, ShieldAlert, Lock, Wifi } from 'lucide-react';
 import { i18n } from './utils/i18n';
 
@@ -153,8 +160,13 @@ export default function App() {
   const [isVaultModalOpen, setIsVaultModalOpen] = useState<boolean>(false);
   const [isReadinessModalOpen, setIsReadinessModalOpen] = useState<boolean>(false);
   const [isSpvModalOpen, setIsSpvModalOpen] = useState<boolean>(false);
+  const [isMultiWalletAuditOpen, setIsMultiWalletAuditOpen] = useState<boolean>(false);
   const [isLegacyForkScannerOpen, setIsLegacyForkScannerOpen] = useState<boolean>(false);
   const [isPrivateKeyScannerOpen, setIsPrivateKeyScannerOpen] = useState<boolean>(false);
+  const [isAutoBackupModalOpen, setIsAutoBackupModalOpen] = useState<boolean>(false);
+  const [isRawBackupMigratorOpen, setIsRawBackupMigratorOpen] = useState<boolean>(false);
+  const [isAddressTypeSwitchOpen, setIsAddressTypeSwitchOpen] = useState<boolean>(false);
+  const [isNextGenHubOpen, setIsNextGenHubOpen] = useState<boolean>(false);
   const [qrScannedKeyForSweep, setQrScannedKeyForSweep] = useState<string>('');
   const [qrScannedSecretForImport, setQrScannedSecretForImport] = useState<string>('');
   const [selectedTxDetail, setSelectedTxDetail] = useState<Transaction | null>(null);
@@ -182,6 +194,84 @@ export default function App() {
     setIsVaultModalOpen(true);
     showToast(lang === 'th' ? '🔒 สแกน Private Key สำเร็จ! พร้อมนำเข้าสู่ Zero-Exposure Vault' : 'Key scanned! Ready to import into secure vault', 'success');
   };
+
+  const handleRestoreFromBackup = (restored: BackupPayload) => {
+    if (restored.realAccount) {
+      setRealAccount(restored.realAccount);
+      setAccount(restored.realAccount);
+    }
+    if (restored.accounts && Array.isArray(restored.accounts)) {
+      setAccounts(restored.accounts);
+    }
+    if (restored.realTransactions && Array.isArray(restored.realTransactions)) {
+      setRealTransactions(restored.realTransactions);
+      setTransactions(restored.realTransactions);
+    }
+    if (restored.security) {
+      setSecurity(restored.security);
+    }
+    if (restored.lang) {
+      setLang(restored.lang);
+    }
+    if (restored.currency) {
+      setCurrency(restored.currency);
+    }
+    showToast(
+      lang === 'th'
+        ? 'กู้คืนข้อมูลทั้งหมดเข้าสู่ ColdVault เรียบร้อยแล้ว!'
+        : 'All data restored to ColdVault!',
+      'success'
+    );
+  };
+
+  const handleMigrateAccountsComplete = (newAccounts: WalletAccount[], primaryAccount?: WalletAccount) => {
+    if (newAccounts.length === 0) return;
+
+    setAccounts((prevAccounts) => {
+      const existingIds = new Set(prevAccounts.map(a => a.id));
+      const toAdd = newAccounts.filter(a => !existingIds.has(a.id));
+      const merged = [...prevAccounts, ...toAdd];
+      try {
+        localStorage.setItem('COLDVAULT_ACCOUNTS_LIST_V2', JSON.stringify(merged));
+      } catch (e) {
+        console.error('Failed to save accounts:', e);
+      }
+      return merged;
+    });
+
+    if (primaryAccount) {
+      setRealAccount(primaryAccount);
+      setAccount(primaryAccount);
+      syncBlockchainData(primaryAccount, true);
+      try {
+        localStorage.setItem('COLDVAULT_REAL_ACCOUNT_V2', JSON.stringify(primaryAccount));
+      } catch (e) {
+        console.error('Failed to save real account:', e);
+      }
+    }
+  };
+
+  // Automated state snapshot recorder with debounce on data change
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      const payload: BackupPayload = {
+        version: '1.0',
+        appVersion: '3.7.0',
+        exportTimestamp: Date.now(),
+        realAccount,
+        accounts,
+        realTransactions,
+        security,
+        lang,
+        currency,
+      };
+      createBackupSnapshot(payload, 'auto_change').catch((err) => {
+        console.error('Auto-backup snapshot error:', err);
+      });
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [realAccount, accounts, realTransactions, security, lang, currency]);
 
   // Save state changes to LocalStorage
   useEffect(() => {
@@ -462,6 +552,7 @@ export default function App() {
     } else {
       // Online -> Offline: Switch immediately
       setAirGapMode(true);
+      sovereignOrchestrator.setAirGapPolicy(true);
       showToast(lang === 'th' ? 'สลับเข้าสู่โหมดออฟไลน์ (Air-Gapped) แล้ว' : 'Switched to Offline Air-Gapped mode', 'info');
     }
   };
@@ -469,6 +560,7 @@ export default function App() {
   const handleConnectOnlineSuccess = (pin: string, isDuress: boolean) => {
     setIsConnectOnlinePinOpen(false);
     setAirGapMode(false);
+    sovereignOrchestrator.setAirGapPolicy(false);
     if (isDuress) {
       activateDecoyMode();
     } else {
@@ -593,8 +685,109 @@ export default function App() {
       'success'
     );
 
+    // Store encrypted vault for zero-exposure address switching and offline operations
+    if (vault?.encryptedSignerKey) {
+      try {
+        localStorage.setItem(`COLDVAULT_ENCRYPTED_SIGNER_${freshAccount.id}`, vault.encryptedSignerKey);
+        localStorage.setItem(`COLDVAULT_VAULT_FINGERPRINT_${freshAccount.id}`, vault.vaultFingerprint);
+      } catch (e) {
+        console.error('Failed to store encrypted signer vault:', e);
+      }
+    }
+
     // Check if the address already has funds on blockchain
     syncBlockchainData(freshAccount, false);
+  };
+
+  // Switch Address Type of an existing wallet (e.g. SegWit -> Legacy or Nested)
+  const handleSwitchAddressType = (
+    targetAccountId: string,
+    newAddressType: AddressType,
+    newAddress: string,
+    newPublicKey: string,
+    newDerivationPath: string,
+    scannedBalanceBtc: number,
+    scannedBalanceSats: number
+  ) => {
+    setAccounts(prev => {
+      const next = prev.map(acc => {
+        if (acc.id === targetAccountId) {
+          return {
+            ...acc,
+            addressType: newAddressType,
+            address: newAddress,
+            publicKey: newPublicKey,
+            derivationPath: newDerivationPath,
+            balanceBtc: scannedBalanceBtc,
+            balanceSats: scannedBalanceSats,
+          };
+        }
+        return acc;
+      });
+      try {
+        localStorage.setItem('COLDVAULT_ACCOUNTS_LIST_V2', JSON.stringify(next));
+      } catch (e) {
+        // ignore
+      }
+      return next;
+    });
+
+    if (account.id === targetAccountId) {
+      const updatedAccount: WalletAccount = {
+        ...account,
+        addressType: newAddressType,
+        address: newAddress,
+        publicKey: newPublicKey,
+        derivationPath: newDerivationPath,
+        balanceBtc: scannedBalanceBtc,
+        balanceSats: scannedBalanceSats,
+      };
+      setAccount(updatedAccount);
+      if (!security.duressActive) {
+        setRealAccount(updatedAccount);
+        try {
+          localStorage.setItem('COLDVAULT_REAL_ACCOUNT_V2', JSON.stringify(updatedAccount));
+        } catch (e) {
+          // ignore
+        }
+      }
+      // Re-sync blockchain data for the newly switched address
+      syncBlockchainData(updatedAccount, true);
+    }
+  };
+
+  // Add Parallel Sibling Wallet (e.g. keeping both SegWit and Legacy)
+  const handleAddParallelWallet = (newAccount: WalletAccount, vault?: ZeroExposureVault) => {
+    setAccounts(prev => {
+      const next = [newAccount, ...prev];
+      try {
+        localStorage.setItem('COLDVAULT_ACCOUNTS_LIST_V2', JSON.stringify(next));
+      } catch (e) {
+        // ignore
+      }
+      return next;
+    });
+
+    setAccount(newAccount);
+    if (!security.duressActive) {
+      setRealAccount(newAccount);
+      try {
+        localStorage.setItem('COLDVAULT_REAL_ACCOUNT_V2', JSON.stringify(newAccount));
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    if (vault?.encryptedSignerKey) {
+      try {
+        localStorage.setItem(`COLDVAULT_ENCRYPTED_SIGNER_${newAccount.id}`, vault.encryptedSignerKey);
+        localStorage.setItem(`COLDVAULT_VAULT_FINGERPRINT_${newAccount.id}`, vault.vaultFingerprint);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    syncBlockchainData(newAccount, true);
   };
 
   // Transaction Created Callback
@@ -788,9 +981,19 @@ export default function App() {
               setQrScannedSecretForImport('');
               setIsVaultModalOpen(true);
             }}
+            onAddNewWallet={() => {
+              setIsWalletManagerOpen(false);
+              setQrScannedSecretForImport('');
+              setIsVaultModalOpen(true);
+            }}
             onOpenWalletManager={() => setIsWalletManagerOpen(true)}
             onOpenQrScanner={() => setIsPrivateKeyScannerOpen(true)}
             onOpenSpvModal={() => setIsSpvModalOpen(true)}
+            onOpenAutoBackup={() => setIsAutoBackupModalOpen(true)}
+            onOpenRawBackup={() => setIsRawBackupMigratorOpen(true)}
+            onOpenAddressTypeSwitch={() => setIsAddressTypeSwitchOpen(true)}
+            onOpenMultiWalletAudit={() => setIsMultiWalletAuditOpen(true)}
+            onOpenNextGenHub={() => setIsNextGenHubOpen(true)}
             onLockApp={() => setIsAppLocked(true)}
             vaultFrozen={security.vaultFrozen}
             onToggleFreeze={() => {
@@ -844,6 +1047,8 @@ export default function App() {
               onOpenQrScanner={() => setIsPrivateKeyScannerOpen(true)}
               onOpenReadinessModal={() => setIsReadinessModalOpen(true)}
               onOpenSpvModal={() => setIsSpvModalOpen(true)}
+              onOpenMultiWalletAudit={() => setIsMultiWalletAuditOpen(true)}
+              onOpenNextGenHub={() => setIsNextGenHubOpen(true)}
               onSelectTxDetail={setSelectedTxDetail}
               onSyncBlockchain={() => syncBlockchainData(account, true)}
               isSyncing={isSyncingBlockchain}
@@ -900,6 +1105,7 @@ export default function App() {
               currency={currency}
               lang={lang}
               onOpenLegacyScannerModal={() => setIsLegacyForkScannerOpen(true)}
+              onOpenAddressTypeSwitchModal={() => setIsAddressTypeSwitchOpen(true)}
             />
           )}
 
@@ -959,6 +1165,10 @@ export default function App() {
               onOpenAddWallet={() => setIsVaultModalOpen(true)}
               onOpenLegacyScannerModal={() => setIsLegacyForkScannerOpen(true)}
               onOpenSpvModal={() => setIsSpvModalOpen(true)}
+              onOpenAutoBackupModal={() => setIsAutoBackupModalOpen(true)}
+              onOpenRawBackupMigratorModal={() => setIsRawBackupMigratorOpen(true)}
+              onOpenAddressTypeSwitchModal={() => setIsAddressTypeSwitchOpen(true)}
+              onOpenNextGenHub={() => setIsNextGenHubOpen(true)}
               airGapMode={airGapMode}
               isDeviceOnline={isDeviceOnline}
               onToggleAirGap={handleToggleAirGap}
@@ -1090,6 +1300,10 @@ export default function App() {
             setQrScannedKeyForSweep(key);
             setIsLegacyForkScannerOpen(true);
           }}
+          onOpenRawBackupMigrator={() => {
+            setIsVaultModalOpen(false);
+            setIsRawBackupMigratorOpen(true);
+          }}
         />
 
         {/* Multi-Wallet Manager Modal */}
@@ -1104,8 +1318,45 @@ export default function App() {
             setQrScannedSecretForImport('');
             setIsVaultModalOpen(true);
           }}
+          onOpenRawBackupMigrator={() => {
+            setIsWalletManagerOpen(false);
+            setIsRawBackupMigratorOpen(true);
+          }}
+          onOpenAddressTypeSwitch={() => {
+            setIsWalletManagerOpen(false);
+            setIsAddressTypeSwitchOpen(true);
+          }}
           onDeleteAccount={handleDeleteAccount}
+          onOpenMultiWalletAudit={() => {
+            setIsWalletManagerOpen(false);
+            setIsMultiWalletAuditOpen(true);
+          }}
           lang={lang}
+        />
+
+        {/* Multi-Wallet BTC Simultaneous Balance & Hard Fork Pipeline Audit Modal */}
+        <MultiWalletAuditModal
+          isOpen={isMultiWalletAuditOpen}
+          onClose={() => setIsMultiWalletAuditOpen(false)}
+          accounts={accounts}
+          activeAccount={account}
+          market={market}
+          currency={currency}
+          lang={lang}
+          onApplyUpdatedAccounts={(updatedAccounts) => {
+            setAccounts(updatedAccounts);
+            const currentUpdated = updatedAccounts.find((a) => a.id === account.id);
+            if (currentUpdated) {
+              setAccount(currentUpdated);
+              setRealAccount(currentUpdated);
+            }
+            showToast(
+              lang === 'th'
+                ? `ตรวจสอบยอดเหรียญทุกกระเป๋าเสร็จสมบูรณ์ (${updatedAccounts.length} กระเป๋า)`
+                : `Simultaneous wallet audit complete (${updatedAccounts.length} wallets)`,
+              'success'
+            );
+          }}
         />
 
         {/* Transaction Detail Sheet Modal */}
@@ -1172,6 +1423,49 @@ export default function App() {
           lang={lang}
           onSelectKeyForSweep={handleSelectKeyForSweep}
           onSelectKeyForImport={handleSelectKeyForImport}
+        />
+
+        {/* Auto Backup & Data Vault Modal */}
+        <AutoBackupModal
+          isOpen={isAutoBackupModalOpen}
+          onClose={() => setIsAutoBackupModalOpen(false)}
+          lang={lang}
+          currency={currency}
+          realAccount={realAccount}
+          accounts={accounts}
+          realTransactions={realTransactions}
+          security={security}
+          onRestoreData={handleRestoreFromBackup}
+          onShowToast={showToast}
+        />
+
+        {/* Raw Backup Ingestion & Legacy Migration Modal */}
+        <RawBackupMigratorModal
+          isOpen={isRawBackupMigratorOpen}
+          onClose={() => setIsRawBackupMigratorOpen(false)}
+          lang={lang}
+          onMigrateComplete={(newAccounts, primaryAccount) => {
+            handleMigrateAccountsComplete(newAccounts, primaryAccount);
+            setIsRawBackupMigratorOpen(false);
+          }}
+          onShowToast={showToast}
+          userPin="123456"
+          onOpenPinModal={triggerPinProtection}
+        />
+
+        {/* Address Type Switcher & Missing Coin Recovery Modal */}
+        <AddressTypeSwitchModal
+          isOpen={isAddressTypeSwitchOpen}
+          onClose={() => setIsAddressTypeSwitchOpen(false)}
+          lang={lang}
+          currentAccount={account}
+          allAccounts={accounts}
+          onSwitchAddressType={handleSwitchAddressType}
+          onAddParallelWallet={handleAddParallelWallet}
+          onShowToast={showToast}
+          userPin="123456"
+          onOpenPinModal={triggerPinProtection}
+          isDeviceOnline={!airGapMode}
         />
       </MobileFrame>
     </>

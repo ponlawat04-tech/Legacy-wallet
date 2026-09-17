@@ -20,7 +20,8 @@ import {
   Zap,
   Snowflake,
   Unlock,
-  Fingerprint
+  Fingerprint,
+  Clipboard
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { Currency, FeeEstimates, Language, MarketData, SecuritySettings, Transaction, WalletAccount } from '../../types/wallet';
@@ -30,6 +31,8 @@ import { createPSBTPayload, validateBitcoinAddress, validateForkAddress } from '
 import { SUPPORTED_MULTI_CHAINS, ChainId, ChainConfig } from '../../types/multiChain';
 import { validateMultiChainAddress } from '../../utils/multiChainVault';
 import { deriveAllBtcVariantsFromSecret, AllBtcAddressFormats } from '../../utils/bitcoinKeyEngine';
+import { cleanAndNormalizeKeyString, readClipboardSafely } from '../../utils/clipboard';
+import { BatchConsolidationHelper } from '../BatchConsolidationHelper';
 
 interface AddressInspection {
   formatName: string;
@@ -182,6 +185,7 @@ export const SendTab: React.FC<SendTabProps> = ({
   onUnfreeze,
 }) => {
   const [selectedChainId, setSelectedChainId] = useState<ChainId>('BTC');
+  const [activeSendMode, setActiveSendMode] = useState<'standard' | 'batch'>('standard');
   const [recipientAddress, setRecipientAddress] = useState<string>('');
   const [amountStr, setAmountStr] = useState<string>('');
   const [feeSpeed, setFeeSpeed] = useState<'low' | 'medium' | 'high' | 'custom'>('medium');
@@ -401,26 +405,60 @@ export const SendTab: React.FC<SendTabProps> = ({
   return (
     <div className="space-y-3.5 pb-20 animate-in fade-in duration-300">
       {/* Transact Mode Segmented Switcher */}
-      {onNavigateToAirGap && (
-        <div className="flex items-center p-1 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-inner">
-          <button
-            type="button"
-            className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-amber-500/20"
-          >
-            <Send className="w-3.5 h-3.5" />
-            <span>{lang === 'th' ? 'โอนเงิน (Send)' : 'Send BTC / Coins'}</span>
-          </button>
+      <div className="flex items-center p-1 rounded-2xl bg-slate-900 border border-slate-800/90 shadow-inner">
+        <button
+          type="button"
+          onClick={() => setActiveSendMode('standard')}
+          className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+            activeSendMode === 'standard'
+              ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 shadow-md shadow-amber-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Send className="w-3.5 h-3.5" />
+          <span>{lang === 'th' ? 'โอนเงิน (Send)' : 'Send Coins'}</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSendMode('batch')}
+          className={`flex-1 py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all ${
+            activeSendMode === 'batch'
+              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-slate-950 shadow-md shadow-emerald-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60'
+          }`}
+        >
+          <Layers className="w-3.5 h-3.5 text-emerald-400" />
+          <span>{lang === 'th' ? 'รวม UTXO แบทช์' : 'Batch Consolidate'}</span>
+          <span className="hidden sm:inline text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-400/20 text-emerald-300 font-mono border border-emerald-400/30">
+            Low-Fee
+          </span>
+        </button>
+
+        {onNavigateToAirGap && (
           <button
             type="button"
             onClick={onNavigateToAirGap}
             className="flex-1 py-2 px-3 rounded-xl text-slate-400 hover:text-slate-200 font-semibold text-xs flex items-center justify-center gap-1.5 transition-all hover:bg-slate-800/60"
           >
             <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{lang === 'th' ? 'เซ็นออฟไลน์ (Air-Gap)' : 'Air-Gap Sign PSBT'}</span>
+            <span>{lang === 'th' ? 'เซ็นออฟไลน์' : 'Air-Gap Sign'}</span>
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
+      {activeSendMode === 'batch' ? (
+        <BatchConsolidationHelper
+          account={account}
+          market={market}
+          currency={currency}
+          lang={lang}
+          onOpenPinModal={onOpenPinModal}
+          onSendSuccess={onSendSuccess}
+          security={security}
+          onClose={() => setActiveSendMode('standard')}
+        />
+      ) : (
       <div className="p-4 sm:p-5 rounded-3xl bg-slate-900 border border-slate-800/90 shadow-xl space-y-3.5">
         {/* Title Header */}
         <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
@@ -491,6 +529,40 @@ export const SendTab: React.FC<SendTabProps> = ({
           </div>
         )}
 
+        {/* Batch UTXO Consolidation Helper Banner */}
+        {selectedChainId === 'BTC' && (
+          <div className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-r from-emerald-950/40 via-slate-900 to-amber-950/30 border border-emerald-500/30 flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center shrink-0">
+                <Layers className="w-4 h-4" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-emerald-200 truncate">
+                    {lang === 'th' ? 'มีเศษเหรียญย่อยสะสม? รวมยอดแบทช์ (Batch Helper)' : 'Have small UTXOs? Batch Consolidation Helper'}
+                  </span>
+                  <span className="hidden sm:inline px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[9px] font-mono border border-emerald-500/30">
+                    Low-Fee
+                  </span>
+                </div>
+                <span className="text-[9.5px] text-slate-400 truncate block">
+                  {lang === 'th'
+                    ? 'รวมหลาย UTXO เป็น 1 แอดเดรสที่สะอาดด้วยค่าขุดต่ำ ประหยัดค่าธรรมเนียมในอนาคต'
+                    : 'Consolidate multiple UTXOs into 1 clean address at low fee rate to slash future costs'}
+                </span>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveSendMode('batch')}
+              className="px-2.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-slate-950 font-bold text-xs flex items-center gap-1 shrink-0 transition-all active:scale-95 shadow-md shadow-emerald-500/20"
+            >
+              <span>{lang === 'th' ? 'รวม UTXO' : 'Consolidate'}</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        )}
+
         {/* Multi-Chain Selector Tabs */}
         <div>
           <label className="text-xs font-semibold text-slate-300 mb-1.5 flex items-center justify-between">
@@ -543,6 +615,21 @@ export const SendTab: React.FC<SendTabProps> = ({
               {t.recipientAddress} ({activeChain.symbol})
             </label>
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  const res = await readClipboardSafely();
+                  if (res.text) {
+                    const clean = cleanAndNormalizeKeyString(res.text);
+                    handleAddressChange(clean);
+                  }
+                }}
+                className="text-[11px] text-amber-300 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 px-2 py-0.5 rounded-lg border border-amber-500/40 flex items-center gap-1 font-semibold active:scale-95 shadow-sm"
+                title={lang === 'th' ? 'วางที่อยู่จากคลิปบอร์ด' : 'Paste Address from Clipboard'}
+              >
+                <Clipboard className="w-3.5 h-3.5 text-amber-300" />
+                <span>{lang === 'th' ? '📋 วาง' : '📋 Paste'}</span>
+              </button>
               <input
                 ref={addressCameraShutterRef}
                 type="file"
@@ -584,6 +671,14 @@ export const SendTab: React.FC<SendTabProps> = ({
               type="text"
               value={recipientAddress}
               onChange={(e) => handleAddressChange(e.target.value)}
+              onPaste={(e) => {
+                const pasted = e.clipboardData.getData('text');
+                if (pasted) {
+                  e.preventDefault();
+                  const clean = cleanAndNormalizeKeyString(pasted);
+                  handleAddressChange(clean);
+                }
+              }}
               placeholder={
                 selectedChainId === 'BTC'
                   ? 'bc1q9v8k32p9zx7m0al4a4c58qfwsy439...'
@@ -625,7 +720,17 @@ export const SendTab: React.FC<SendTabProps> = ({
                   <Layers className="w-3.5 h-3.5 text-amber-400" />
                   <span>{lang === 'th' ? 'โอนเข้าแอดเดรสของฉัน (รวม UTXO / สลับรูปแบบ):' : 'Self-Transfer / Change Format (Consolidation):'}</span>
                 </span>
-                <span className="text-[9.5px] text-slate-500 font-mono">4 Variants</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[9.5px] text-slate-500 font-mono">4 Variants</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSendMode('batch')}
+                    className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold flex items-center gap-1 transition-colors px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 active:scale-95"
+                  >
+                    <Layers className="w-3 h-3" />
+                    <span>{lang === 'th' ? 'รวมยอดแบทช์' : 'Batch Helper'}</span>
+                  </button>
+                </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
                 <button
@@ -833,6 +938,7 @@ export const SendTab: React.FC<SendTabProps> = ({
           </button>
         </div>
       </div>
+      )}
 
       {/* PSBT Modal */}
       {psbtModalData && (

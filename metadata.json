@@ -1,6 +1,6 @@
 {
   "name": "Legacy wallet",
-  "description": "Secure Bitcoin & Hard Forks Vault with real-time rates, offline zero-exposure seed security, and native support for BTC, BCH, BSV, BTG, and XEC.",
+  "description": "Next-Gen Sovereign Bitcoin & Hard Forks Matrix Vault with unified OS runtime, real-time control plane, inter-system reactive linkage, and zero-exposure air-gap security.",
   "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

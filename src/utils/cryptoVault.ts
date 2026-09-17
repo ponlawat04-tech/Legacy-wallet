@@ -1,6 +1,11 @@
 import { AddressType, WalletAccount, ZeroExposureVault } from '../types/wallet';
 import { BIP39_ENGLISH_WORDS } from './bip39Words';
 import {
+  generateFlexibleSeedPhrase,
+  validateFlexibleSeedPhrase,
+  SupportedWordCount,
+} from './advancedWalletEngines';
+import {
   parseAndValidatePrivateKey,
   parseExtendedPrivateKey,
   deriveRealAddressesFromPrivateKey,
@@ -117,53 +122,20 @@ function encodeBase58Check(version: number, payload: Uint8Array, checksum: Uint8
 }
 
 /**
- * Generate a cryptographically valid random 12/24-word BIP-39 seed phrase with SHA-256 checksum
+ * Generate a cryptographically valid random seed phrase of flexible length (12, 15, 16, 18, 20, 21, 24 words)
+ * Supports BIP-39 standard entropy calculation, Polyseed, and SLIP-0039 Shamir shares
  */
-export async function generateOfflineSeedPhrase(wordCount: 12 | 24 = 12): Promise<string[]> {
-  const entropyByteLength = wordCount === 24 ? 32 : 16;
-  const entropy = new Uint8Array(entropyByteLength);
-  crypto.getRandomValues(entropy);
-
-  const hashBuffer = await crypto.subtle.digest('SHA-256', entropy);
-  const hashBytes = new Uint8Array(hashBuffer);
-
-  const checksumBitsCount = entropyByteLength / 4; // 4 bits for 128-bit, 8 bits for 256-bit
-
-  let bitString = '';
-  for (let i = 0; i < entropy.length; i++) {
-    bitString += entropy[i].toString(2).padStart(8, '0');
-  }
-
-  const checksumFirstByte = hashBytes[0].toString(2).padStart(8, '0');
-  bitString += checksumFirstByte.slice(0, checksumBitsCount);
-
-  const words: string[] = [];
-  for (let i = 0; i < bitString.length; i += 11) {
-    const chunk = bitString.slice(i, i + 11);
-    const index = parseInt(chunk, 2);
-    words.push(BIP39_ENGLISH_WORDS[index]);
-  }
-
-  return words;
+export async function generateOfflineSeedPhrase(wordCount: SupportedWordCount = 12): Promise<string[]> {
+  const result = await generateFlexibleSeedPhrase(wordCount);
+  return result.words;
 }
 
 /**
- * Validate seed phrase format & BIP-39 word list
+ * Validate seed phrase format & word list across all supported lengths (12, 15, 16, 18, 20, 21, 24 words)
  */
 export function validateSeedPhrase(phrase: string[]): { valid: boolean; error?: string } {
-  if (phrase.length !== 12 && phrase.length !== 24) {
-    return { valid: false, error: 'Seed phrase must be exactly 12 or 24 words' };
-  }
-  
-  const invalidWords = phrase.filter(w => !BIP39_ENGLISH_WORDS.includes(w.toLowerCase().trim()));
-  if (invalidWords.length > 0) {
-    return { 
-      valid: false, 
-      error: `Invalid BIP-39 word(s): ${invalidWords.slice(0, 3).join(', ')}${invalidWords.length > 3 ? '...' : ''}` 
-    };
-  }
-  
-  return { valid: true };
+  const result = validateFlexibleSeedPhrase(phrase);
+  return { valid: result.valid, error: result.error };
 }
 
 /**

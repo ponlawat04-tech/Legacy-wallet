@@ -55,7 +55,7 @@ export interface SpvPeer {
   bestBlockHash: string;
   latencyMs: number;
   connected: boolean;
-  status: 'connected' | 'connecting' | 'idle' | 'failed';
+  status: 'connected' | 'connecting' | 'idle' | 'failed' | 'disconnected';
   lastPing: number;
   userAgent?: string;
   protocolVersion: number;
@@ -91,6 +91,8 @@ export interface SpvVerificationResult {
   powVerified: boolean;
   details: string;
   timestamp: number;
+  branchHashes?: string[];
+  txIndex?: number;
 }
 
 export interface SpvDownloadProgress {
@@ -177,4 +179,54 @@ export interface MainnetVerificationReport {
   magicHex: string;
   port: number;
   checks: MainnetParameterItem[];
+}
+
+export interface MerkleCalculationStep {
+  level: number;
+  inputCount: number;
+  wasOddDuplicated: boolean;
+  duplicatedHash?: string;
+  pairs: Array<{
+    leftHex: string;
+    rightHex: string;
+    parentHex: string;
+  }>;
+}
+
+export interface BlockMerkleCalculationResult {
+  computedMerkleRoot: string;
+  computedMerkleRootInternal: string;
+  totalTransactions: number;
+  coinbaseTxid: string;
+  treeDepth: number;
+  oddDuplicationCount: number;
+  steps: MerkleCalculationStep[];
+  matchedExpectedRoot?: boolean;
+  isMutated?: boolean;
+  cve2012_2459Detected?: boolean;
+}
+
+export interface MerkleDiagnosticRule {
+  rule: string;
+  nameTh: string;
+  nameEn: string;
+  status: 'pass' | 'fail' | 'warn';
+  detail: string;
+  solution: string;
+}
+
+export interface MerkleDiagnosticReport {
+  blockHeight?: number;
+  blockHash?: string;
+  expectedHeaderMerkleRoot: string;
+  computedMerkleRoot: string;
+  isMatch: boolean;
+  endiannessVerified: boolean;
+  coinbaseAtZero: boolean;
+  oddDuplicationApplied: boolean;
+  cve2012Clean: boolean;
+  totalTxCountReported?: number;
+  totalTxCountProvided: number;
+  isComplete: boolean;
+  rules: MerkleDiagnosticRule[];
 }

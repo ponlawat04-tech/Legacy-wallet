@@ -87,6 +87,7 @@ interface ForkAssetVaultCardProps {
   lang: Language;
   onNavigateTab: (tab: any) => void;
   onOpenLegacyScannerModal: () => void;
+  onOpenMultiWalletAudit?: () => void;
 }
 
 export const ForkAssetVaultCard: React.FC<ForkAssetVaultCardProps> = ({
@@ -96,6 +97,7 @@ export const ForkAssetVaultCard: React.FC<ForkAssetVaultCardProps> = ({
   lang,
   onNavigateTab,
   onOpenLegacyScannerModal,
+  onOpenMultiWalletAudit,
 }) => {
   const forkBalances = account.forkBalances || [];
 
@@ -132,14 +134,28 @@ export const ForkAssetVaultCard: React.FC<ForkAssetVaultCardProps> = ({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onOpenLegacyScannerModal}
-          className="px-2.5 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-bold text-[11px] flex items-center gap-1 transition-all shrink-0 active:scale-95 shadow-md shadow-cyan-500/10"
-        >
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>{lang === 'th' ? 'สแกน/เคลม' : 'Scan Forks'}</span>
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {onOpenMultiWalletAudit && (
+            <button
+              type="button"
+              onClick={onOpenMultiWalletAudit}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-[11px] flex items-center gap-1 transition-all active:scale-95 shadow-md shadow-amber-500/10"
+              title={lang === 'th' ? 'ตรวจสอบกระบวนการดึงเหรียญ Forks' : 'Audit Fork Pipeline'}
+            >
+              <Coins className="w-3.5 h-3.5" />
+              <span>{lang === 'th' ? 'ตรวจสอบกระบวนการ' : 'Audit Pipeline'}</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={onOpenLegacyScannerModal}
+            className="px-2.5 py-1.5 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-300 font-bold text-[11px] flex items-center gap-1 transition-all active:scale-95 shadow-md shadow-cyan-500/10"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{lang === 'th' ? 'สแกน/เคลม' : 'Scan Forks'}</span>
+          </button>
+        </div>
       </div>
 
       {/* Portfolio Total Valuation Bar */}

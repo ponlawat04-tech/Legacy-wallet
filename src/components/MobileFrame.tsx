@@ -73,20 +73,33 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({
   ];
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-start p-0 sm:p-3 md:p-5 antialiased selection:bg-amber-500/30">
+    <div className="min-h-screen bg-slate-950 vault-ambient-bg text-slate-100 flex flex-col items-center justify-start p-0 sm:p-3 md:p-5 antialiased selection:bg-amber-500/30 relative overflow-x-hidden">
+      {/* Subtle Ambient Radial Lighting for Desktop */}
+      <div className="fixed top-0 left-1/2 -translate-x-1/2 w-[800px] h-[350px] bg-amber-500/5 blur-[120px] pointer-events-none -z-10 rounded-full" />
+      <div className="fixed bottom-0 right-10 w-[500px] h-[350px] bg-sky-500/5 blur-[120px] pointer-events-none -z-10 rounded-full" />
+
       {/* View Mode Toggle Bar (Desktop/Tablet Top Bar) */}
-      <div className="w-full max-w-lg mb-2 sm:mb-2.5 px-3.5 py-1.5 bg-slate-900/90 backdrop-blur-md border border-slate-800/80 rounded-2xl flex items-center justify-between shadow-lg text-xs hidden sm:flex">
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
-          <span className="font-bold text-slate-200 tracking-tight text-[11px]">
-            {lang === 'th' ? 'ColdVault ระบบความปลอดภัยระดับฮาร์ดแวร์' : 'ColdVault Mobile Security Engine'}
-          </span>
+      <div className="w-full max-w-lg mb-2 sm:mb-2.5 px-3.5 py-2 bg-slate-900/90 backdrop-blur-xl border border-slate-800/90 rounded-2xl flex items-center justify-between shadow-xl text-xs hidden sm:flex z-20">
+        <div className="flex items-center gap-2.5">
+          <img
+            src="/icon.svg"
+            alt="ColdVault Icon"
+            className="w-5 h-5 rounded-md shadow-sm shrink-0 drop-shadow-[0_2px_8px_rgba(245,158,11,0.3)]"
+          />
+          <div className="flex items-center gap-1.5">
+            <span className="font-extrabold text-slate-100 tracking-tight text-xs">
+              ColdVault
+            </span>
+            <span className="text-[10px] font-mono font-semibold px-1.5 py-0.2 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
+              SOVEREIGN
+            </span>
+          </div>
         </div>
 
         <button
           type="button"
           onClick={() => setIsMobileFrame(!isMobileFrame)}
-          className="px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium flex items-center gap-1.5 transition-all border border-slate-700/80 shadow-sm active:scale-95 text-[11px]"
+          className="px-2.5 py-1.5 rounded-xl bg-slate-800/90 hover:bg-slate-700/90 text-slate-300 hover:text-slate-100 font-medium flex items-center gap-1.5 transition-all border border-slate-700/80 shadow-sm active:scale-95 text-[11px]"
         >
           {isMobileFrame ? (
             <>
@@ -104,9 +117,9 @@ export const MobileFrame: React.FC<MobileFrameProps> = ({
 
       {/* Main Container */}
       <div
-        className={`w-full bg-slate-950 transition-all duration-300 ${
+        className={`w-full bg-slate-950/95 backdrop-blur-2xl transition-all duration-300 ${
           isMobileFrame
-            ? 'max-w-[440px] h-[100dvh] sm:h-[860px] sm:max-h-[92vh] sm:rounded-[38px] sm:border-[6px] sm:border-slate-800/90 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.95)] overflow-hidden flex flex-col relative ring-1 ring-slate-700/40'
+            ? 'max-w-[440px] h-[100dvh] sm:h-[860px] sm:max-h-[92vh] sm:rounded-[38px] sm:border-[5px] sm:border-slate-800/90 shadow-[0_25px_80px_-15px_rgba(0,0,0,0.95)] overflow-hidden flex flex-col relative ring-1 ring-slate-700/40'
             : 'max-w-4xl sm:rounded-3xl sm:border border-slate-800/90 min-h-[100dvh] sm:min-h-[92vh] h-[100dvh] sm:h-[92vh] flex flex-col relative sm:shadow-2xl overflow-hidden'
         }`}
       >

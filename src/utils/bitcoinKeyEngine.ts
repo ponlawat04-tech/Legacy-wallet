@@ -509,8 +509,9 @@ export function deriveAllBtcVariantsFromSecret(
   const cleanPassphrase = passphrase.trim();
   const words = clean.split(/\s+/);
 
-  // 1. BIP-39 Mnemonic Seed Phrase (12 or 24 words)
-  if ((words.length === 12 || words.length === 24) && words.every(w => BIP39_ENGLISH_WORDS.includes(w.toLowerCase()))) {
+  // 1. Flexible Mnemonic Seed Phrase (12, 15, 16, 18, 20, 21, 24 words)
+  const validLengths = [12, 15, 16, 18, 20, 21, 24];
+  if (validLengths.includes(words.length) && words.every(w => BIP39_ENGLISH_WORDS.includes(w.toLowerCase()))) {
     try {
       const seedBytes = deriveBip39SeedSync(clean, cleanPassphrase);
       const master = deriveMasterKeyFromSeed(seedBytes);
@@ -1144,6 +1145,218 @@ export function deriveChildFromExtendedKey(
     childIndex: lastIndex,
     parentFingerprint: currentParentFingerprint,
     fullPath: extKey.isMaster ? `m/${cleanPath}` : cleanPath,
+  };
+}
+
+/**
+ * BIP-32 Public Child Key Derivation (CKDpub)
+ * Derives child public key and chain code directly from parent public key without exposing private key
+ */
+export function ckdPub(
+  parentPubKey: Uint8Array,
+  parentChainCode: Uint8Array,
+  index: number
+): { pubKey: Uint8Array; chainCode: Uint8Array } {
+  if (index >= 0x80000000) {
+    throw new Error('Cannot derive hardened child from extended public key (CKDpub)');
+  }
+  const data = new Uint8Array(37);
+  data.set(parentPubKey, 0);
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  view.setUint32(33, index, false);
+
+  const I = hmac(sha512, parentChainCode, data);
+  const IL = I.slice(0, 32);
+  const IR = I.slice(32, 64);
+
+  const ILNum = BigInt('0x' + bytesToHex(IL));
+  if (ILNum >= SECP256K1_N) {
+    throw new Error('Invalid IL child scalar >= N');
+  }
+
+  // Ki = point(IL) + parentPubKey
+  const KiPoint = secp.Point.BASE.multiply(ILNum).add(secp.Point.fromHex(bytesToHex(parentPubKey)));
+  const childPubKey = KiPoint.toBytes(true);
+
+  return {
+    pubKey: childPubKey,
+    chainCode: IR,
+  };
+}
+
+export interface DerivedXpubAddressInfo {
+  index: number;
+  chainType: 'external' | 'change';
+  path: string;
+  pubKeyHex: string;
+  address: string;
+  addressType: 'legacy' | 'nested_segwit' | 'native_segwit' | 'taproot';
+  formatLabel: string;
+  // Fork addresses
+  bchCashAddr: string;
+  bsvAddr: string;
+  btgAddr: string;
+  xecCashAddr: string;
+}
+
+/**
+ * Convert an extended key between SLIP-0132 versions (e.g. zpub -> xpub or ypub -> xpub)
+ */
+export function convertExtendedKeyVersion(
+  extKeyStr: string,
+  targetPrefix: 'xpub' | 'ypub' | 'zpub' | 'tpub' | 'upub' | 'vpub'
+): string {
+  let clean = extKeyStr.trim();
+  if (/^xpup/i.test(clean)) clean = 'xpub' + clean.slice(4);
+  if (/^zpup/i.test(clean)) clean = 'zpub' + clean.slice(4);
+  if (/^ypup/i.test(clean)) clean = 'ypub' + clean.slice(4);
+
+  const body = decodeRawBase58Check(clean);
+  if (!body || body.length !== 78) {
+    throw new Error('Invalid extended key format');
+  }
+
+  const targetVersion = BIP32_VERSIONS[targetPrefix];
+  if (!targetVersion) {
+    throw new Error(`Unsupported target prefix: ${targetPrefix}`);
+  }
+
+  const converted = new Uint8Array(body);
+  const view = new DataView(converted.buffer, converted.byteOffset, converted.byteLength);
+  view.setUint32(0, targetVersion, false);
+
+  const checksum = sha256(sha256(converted)).subarray(0, 4);
+  const full = new Uint8Array(82);
+  full.set(converted, 0);
+  full.set(checksum, 78);
+  return base58Encode(full);
+}
+
+/**
+ * Derives a sequence of addresses from an extended public key (xpub, ypub, zpub, tpub, upub, vpub)
+ * Uses standard gap limit (count external receiving + changeCount internal change)
+ */
+export function deriveAddressesFromExtendedPublicKey(
+  extKeyStr: string,
+  count: number = 20,
+  changeCount: number = 5
+): {
+  keyDetails: ExtendedPublicKeyDetails;
+  addresses: DerivedXpubAddressInfo[];
+} {
+  let clean = extKeyStr.trim();
+  if (/^xpup/i.test(clean)) clean = 'xpub' + clean.slice(4);
+  if (/^zpup/i.test(clean)) clean = 'zpub' + clean.slice(4);
+  if (/^ypup/i.test(clean)) clean = 'ypub' + clean.slice(4);
+
+  const keyDetails = parseExtendedPublicKey(clean);
+  if (!keyDetails) {
+    throw new Error('Invalid extended public key (must be xpub, ypub, zpub, tpub, upub, or vpub)');
+  }
+
+  const isTestnet = keyDetails.network === 'testnet';
+  const hrp = isTestnet ? 'tb' : 'bc';
+  const p2pkhVer = isTestnet ? 0x6f : 0x00;
+  const p2shVer = isTestnet ? 0xc4 : 0x05;
+
+  const results: DerivedXpubAddressInfo[] = [];
+
+  // Determine standard address format based on extended key prefix
+  let defaultType: 'legacy' | 'nested_segwit' | 'native_segwit' = 'legacy';
+  if (keyDetails.prefix === 'zpub' || keyDetails.prefix === 'vpub') {
+    defaultType = 'native_segwit';
+  } else if (keyDetails.prefix === 'ypub' || keyDetails.prefix === 'upub') {
+    defaultType = 'nested_segwit';
+  } else {
+    defaultType = 'legacy';
+  }
+
+  // Helper to format a 33-byte compressed public key into address
+  const formatPubToAddress = (pubKey: Uint8Array) => {
+    const pubHex = bytesToHex(pubKey);
+    const h160 = hash160(pubKey);
+
+    let address = '';
+    let formatLabel = '';
+
+    if (defaultType === 'native_segwit') {
+      address = encodeBech32Address(hrp, 0, h160, 'bech32');
+      formatLabel = 'Native SegWit (Bech32 bc1q...)';
+    } else if (defaultType === 'nested_segwit') {
+      const redeemScript = new Uint8Array(22);
+      redeemScript[0] = 0x00;
+      redeemScript[1] = 0x14;
+      redeemScript.set(h160, 2);
+      const scriptHash = hash160(redeemScript);
+      address = encodeBase58Check(p2shVer, scriptHash);
+      formatLabel = 'Nested SegWit (P2SH 3...)';
+    } else {
+      address = encodeBase58Check(p2pkhVer, h160);
+      formatLabel = 'Legacy (P2PKH 1...)';
+    }
+
+    const bchCashAddr = encodeCashAddress(h160, isTestnet ? 'bchtest' : 'bitcoincash');
+    const bsvAddr = encodeBase58Check(p2pkhVer, h160);
+    const btgAddr = encodeBase58Check(38, h160);
+    const xecCashAddr = encodeCashAddress(h160, 'ecash');
+
+    return {
+      pubHex,
+      address,
+      addressType: defaultType,
+      formatLabel,
+      bchCashAddr,
+      bsvAddr,
+      btgAddr,
+      xecCashAddr,
+    };
+  };
+
+  // Derive external chain (0)
+  const extChain = ckdPub(keyDetails.pubKeyBytes, keyDetails.chainCode, 0);
+  for (let i = 0; i < count; i++) {
+    const child = ckdPub(extChain.pubKey, extChain.chainCode, i);
+    const formatted = formatPubToAddress(child.pubKey);
+    results.push({
+      index: i,
+      chainType: 'external',
+      path: `0/${i}`,
+      pubKeyHex: formatted.pubHex,
+      address: formatted.address,
+      addressType: formatted.addressType,
+      formatLabel: formatted.formatLabel,
+      bchCashAddr: formatted.bchCashAddr,
+      bsvAddr: formatted.bsvAddr,
+      btgAddr: formatted.btgAddr,
+      xecCashAddr: formatted.xecCashAddr,
+    });
+  }
+
+  // Derive internal change chain (1)
+  if (changeCount > 0) {
+    const changeChain = ckdPub(keyDetails.pubKeyBytes, keyDetails.chainCode, 1);
+    for (let i = 0; i < changeCount; i++) {
+      const child = ckdPub(changeChain.pubKey, changeChain.chainCode, i);
+      const formatted = formatPubToAddress(child.pubKey);
+      results.push({
+        index: i,
+        chainType: 'change',
+        path: `1/${i}`,
+        pubKeyHex: formatted.pubHex,
+        address: formatted.address,
+        addressType: formatted.addressType,
+        formatLabel: formatted.formatLabel + ' (Change)',
+        bchCashAddr: formatted.bchCashAddr,
+        bsvAddr: formatted.bsvAddr,
+        btgAddr: formatted.btgAddr,
+        xecCashAddr: formatted.xecCashAddr,
+      });
+    }
+  }
+
+  return {
+    keyDetails,
+    addresses: results,
   };
 }
 

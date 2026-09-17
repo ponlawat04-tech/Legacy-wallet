@@ -25,14 +25,15 @@ import {
   Snowflake,
   Unlock,
   Cpu,
-  GitBranch
+  GitBranch,
+  Coins
 } from 'lucide-react';
 import { ActiveTab, Currency, Language, MarketData, SecuritySettings, Transaction, WalletAccount } from '../../types/wallet';
 import { i18n } from '../../utils/i18n';
 import { btcToSats, formatBtc, formatFiat, formatSats, satsToBtc } from '../../utils/mockMarket';
 import { ForkAssetVaultCard } from '../ForkAssetVaultCard';
 import { WalletHoldingsCard } from '../WalletHoldingsCard';
-import { APP_VERSION_TAG } from '../../utils/version';
+import { APP_VERSION, APP_VERSION_TAG } from '../../utils/version';
 
 interface HomeTabProps {
   account: WalletAccount;
@@ -46,6 +47,8 @@ interface HomeTabProps {
   onOpenQrScanner?: () => void;
   onOpenReadinessModal: () => void;
   onOpenSpvModal?: () => void;
+  onOpenMultiWalletAudit?: () => void;
+  onOpenNextGenHub?: () => void;
   onSelectTxDetail: (tx: Transaction) => void;
   onSyncBlockchain?: () => void;
   isSyncing?: boolean;
@@ -65,6 +68,8 @@ export const HomeTab: React.FC<HomeTabProps> = ({
   onOpenQrScanner,
   onOpenReadinessModal,
   onOpenSpvModal,
+  onOpenMultiWalletAudit,
+  onOpenNextGenHub,
   onSelectTxDetail,
   onSyncBlockchain,
   isSyncing = false,
@@ -115,15 +120,27 @@ export const HomeTab: React.FC<HomeTabProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
+        <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap justify-start sm:justify-end shrink-0">
+          {onOpenMultiWalletAudit && (
+            <button
+              type="button"
+              onClick={onOpenMultiWalletAudit}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center gap-1 transition-all shrink-0 active:scale-95 shadow-sm"
+              title={lang === 'th' ? 'ตรวจสอบยอดทุกกระเป๋าพร้อมกัน & Hard Forks' : 'Audit All Wallets & Fork Pipeline'}
+            >
+              <Coins className="w-3.5 h-3.5 text-amber-400" />
+              <span>{lang === 'th' ? 'ตรวจทุกกระเป๋า' : 'Audit All'}</span>
+            </button>
+          )}
+
           {onOpenSpvModal && (
             <button
               type="button"
               onClick={onOpenSpvModal}
-              className="px-2.5 py-1.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 font-bold text-[11px] flex items-center gap-1 transition-all shrink-0 active:scale-95 shadow-sm"
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 font-bold text-[11px] flex items-center gap-1 transition-all shrink-0 active:scale-95 shadow-sm"
               title={lang === 'th' ? 'เปิดแดชบอร์ดโหนด SPV' : 'Open SPV Node Dashboard'}
             >
-              <Cpu className="w-3.5 h-3.5 text-amber-400" />
+              <Cpu className="w-3.5 h-3.5 text-slate-400" />
               <span>{lang === 'th' ? 'โหนด SPV' : 'SPV Node'}</span>
             </button>
           )}
@@ -178,17 +195,28 @@ export const HomeTab: React.FC<HomeTabProps> = ({
       )}
 
       {/* Balance Hero Card */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900/95 to-slate-950 border border-slate-800/90 p-5 sm:p-6 shadow-2xl text-slate-100 ring-1 ring-slate-800/50">
+      <div className="relative overflow-hidden rounded-3xl vault-card-glass border border-slate-800/90 p-5 sm:p-6 shadow-2xl text-slate-100 ring-1 ring-slate-800/50">
         {/* Glow Ambient Highlights */}
         <div className="absolute -top-10 -right-10 w-36 h-36 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
         <div className="absolute -bottom-10 -left-10 w-36 h-36 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="relative z-10">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
-            <span className="font-semibold tracking-wider uppercase text-[10px] text-slate-400 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-              {t.totalBalance}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="font-semibold tracking-wider uppercase text-[10px] text-slate-400 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                {t.totalBalance}
+              </span>
+              <button
+                type="button"
+                onClick={() => onNavigateTab('security')}
+                className="px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 font-mono text-[9.5px] font-bold flex items-center gap-1 transition-all active:scale-95 cursor-pointer"
+                title={lang === 'th' ? 'เปิดศูนย์ควบคุมความปลอดภัย' : 'Open Security Command Center'}
+              >
+                <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                <span>{security?.pinHash ? 'SOVEREIGN SECURE' : 'SETUP PIN'}</span>
+              </button>
+            </div>
             <div className="flex items-center gap-1">
               {onSyncBlockchain && (
                 <button
@@ -370,7 +398,43 @@ export const HomeTab: React.FC<HomeTabProps> = ({
               lang={lang}
               onNavigateTab={onNavigateTab}
               onOpenLegacyScannerModal={onOpenLegacyScannerModal || (() => {})}
+              onOpenMultiWalletAudit={onOpenMultiWalletAudit}
             />
+          </div>
+        )}
+      </div>
+
+      {/* Next-Generation Sovereign Matrix Card */}
+      <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-slate-900 to-slate-900 border border-amber-500/30 shadow-md flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shrink-0">
+            <Sparkles className="w-4 h-4 animate-pulse" />
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-slate-100 truncate">
+                {lang === 'th' ? 'สถาปัตยกรรม เจเนเรชั่นใหม่' : 'Next-Gen Sovereign Matrix'}
+              </span>
+              <span className="px-1.5 py-0.2 rounded bg-amber-500/20 text-[9px] font-mono font-bold text-amber-300 border border-amber-500/40">
+                v{APP_VERSION}
+              </span>
+            </div>
+            <span className="text-[10px] text-slate-400 font-mono block truncate">
+              {lang === 'th' ? 'บูรณาการ 4 เสาหลัก: ระบบปฏิบัติการ • การควบคุม • เชื่อมโยง • ปลอดภัย' : 'Unified OS • Control Plane • Inter-System Linkage • Security'}
+            </span>
+          </div>
+        </div>
+
+        {onOpenNextGenHub && (
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={onOpenNextGenHub}
+              className="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold transition-all border border-amber-500/40 flex items-center gap-1 active:scale-95 cursor-pointer"
+            >
+              <span>{lang === 'th' ? 'เปิดระบบ' : 'Open Matrix'}</span>
+              <ChevronRight className="w-3 h-3 text-amber-400" />
+            </button>
           </div>
         )}
       </div>

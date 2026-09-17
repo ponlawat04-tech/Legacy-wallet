@@ -187,6 +187,16 @@ export const BITCOIN_MAINNET_CHECKPOINTS: SpvCheckpoint[] = [
     chainWork: '0000000000000000000000000000000000000000b4974f284e3119ac6f000000',
     notes: 'Consensus Tip Checkpoint',
   },
+  {
+    height: 967016,
+    hash: '0000000000000000000188ae61d1083a502b3b30c1b885ad33dbee20265bd51c',
+    merkleRoot: '06792dc1bbc1d056603b2c9f9e55319eb6c8de09a60093f2066e6f50db549c78',
+    time: 1789412935,
+    bits: 0x170188ae,
+    targetHex: '0000000000000000000188ae0000000000000000000000000000000000000000',
+    chainWork: '0000000000000000000000000000000000000000d84a7e923e3e01bc6f000000',
+    notes: 'Block #967016 Canonical Checkpoint (4,077 TXs)',
+  },
 ];
 
 /**

@@ -26,13 +26,15 @@ import {
   Cpu,
   Wallet,
   ExternalLink,
-  HelpCircle
+  HelpCircle,
+  Clipboard
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { Language, Currency } from '../types/wallet';
 import { detectKeyType, scanLegacyKeyAndForks } from '../utils/legacyForkScanner';
 import { acquireCameraStream, isRunningInIframe, openAppInNewTab, isAndroidWebViewOrApk } from '../utils/cameraHelper';
 import { AndroidApkCameraPermissionModal } from './AndroidApkCameraPermissionModal';
+import { cleanAndNormalizeKeyString, readClipboardSafely } from '../utils/clipboard';
 
 export type KeyTypeDetection = ReturnType<typeof detectKeyType>;
 
@@ -80,8 +82,9 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const cameraShutterInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Clean key strings (e.g. from bitcoin: URIs or spaces)
+  // Clean key strings (e.g. from bitcoin: URIs, quotes, 0x prefixes, or spaces)
   const cleanExtractedKey = (raw: string): string => {
+    if (!raw) return '';
     let clean = raw.trim();
     if (clean.startsWith('bitcoin:') || clean.startsWith('ethereum:') || clean.startsWith('solana:')) {
       // Check for uri parameters like ?key= or path
@@ -96,7 +99,21 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
         clean = afterScheme.split('?')[0].trim();
       }
     }
-    return clean;
+    return cleanAndNormalizeKeyString(clean);
+  };
+
+  const handleDirectPaste = async () => {
+    const result = await readClipboardSafely();
+    if (result.text) {
+      const cleaned = cleanExtractedKey(result.text);
+      if (cleaned) {
+        setManualText(cleaned);
+        processDecodedString(cleaned);
+      }
+    } else {
+      // If clipboard read is restricted, open manual input so user can tap and paste
+      setManualInputOpen(true);
+    }
   };
 
   const processDecodedString = (text: string) => {
@@ -561,8 +578,18 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
                 className="hidden"
               />
 
-              {/* Bottom Quick Action Triggers (3 Options for 100% Android Success) */}
-              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+              {/* Bottom Quick Action Triggers (4 Options including Instant Paste) */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 sm:gap-2">
+                <button
+                  type="button"
+                  onClick={handleDirectPaste}
+                  className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-r from-purple-600/30 to-indigo-600/30 hover:from-purple-600/40 hover:to-indigo-600/40 border border-purple-500/50 text-purple-200 text-[11px] sm:text-xs font-bold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md text-center"
+                  title={lang === 'th' ? 'กดวาง Private Key จากคลิปบอร์ดทันที' : 'Instant Paste Key from Clipboard'}
+                >
+                  <Clipboard className="w-4 h-4 text-purple-300 shrink-0" />
+                  <span className="truncate">{lang === 'th' ? '📋 กดวาง Key' : '📋 Paste Key'}</span>
+                </button>
+
                 <button
                   type="button"
                   onClick={() => cameraShutterInputRef.current?.click()}
@@ -584,22 +611,45 @@ export const PrivateKeyQrScannerModal: React.FC<PrivateKeyQrScannerModalProps> =
                 <button
                   type="button"
                   onClick={() => setManualInputOpen(!manualInputOpen)}
-                  className="p-2.5 sm:p-3 rounded-2xl bg-slate-800/80 hover:bg-slate-800 border border-slate-700 text-slate-200 text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md text-center"
+                  className={`p-2.5 sm:p-3 rounded-2xl border text-[11px] sm:text-xs font-semibold flex flex-col sm:flex-row items-center justify-center gap-1.5 transition-all active:scale-95 shadow-md text-center ${
+                    manualInputOpen
+                      ? 'bg-indigo-600/30 border-indigo-500/50 text-indigo-200'
+                      : 'bg-slate-800/80 hover:bg-slate-800 border-slate-700 text-slate-200'
+                  }`}
                 >
                   <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span className="truncate">{lang === 'th' ? 'พิมพ์/วางข้อความ' : 'Manual Paste'}</span>
+                  <span className="truncate">{lang === 'th' ? 'พิมพ์ข้อความ' : 'Manual Input'}</span>
                 </button>
               </div>
 
               {/* Manual Input Dropdown */}
               {manualInputOpen && (
                 <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 space-y-2 animate-in fade-in">
-                  <label className="text-[11px] font-bold text-slate-300 block">
-                    {lang === 'th' ? 'วาง Private Key หรือ Seed Phrase โดยตรง' : 'Paste Private Key or Seed Phrase'}
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-300">
+                      {lang === 'th' ? 'วาง Private Key หรือ Seed Phrase โดยตรง' : 'Paste Private Key or Seed Phrase'}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={handleDirectPaste}
+                      className="px-2 py-0.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 font-bold text-[10.5px] border border-purple-500/40 flex items-center gap-1 transition-all active:scale-95"
+                    >
+                      <Clipboard className="w-3 h-3 text-purple-300" />
+                      <span>{lang === 'th' ? '📋 กดวาง' : '📋 Paste'}</span>
+                    </button>
+                  </div>
                   <textarea
                     value={manualText}
                     onChange={(e) => setManualText(e.target.value)}
+                    onPaste={(e) => {
+                      const pasted = e.clipboardData.getData('text');
+                      if (pasted) {
+                        e.preventDefault();
+                        const cleaned = cleanExtractedKey(pasted);
+                        setManualText(cleaned);
+                        processDecodedString(cleaned);
+                      }
+                    }}
                     placeholder="WIF (5/K/L...), 64-Hex, or 12/24 words..."
                     rows={2}
                     className="w-full p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-mono text-slate-100 focus:outline-none focus:border-purple-500"

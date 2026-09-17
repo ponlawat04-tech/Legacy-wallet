@@ -16,7 +16,8 @@ import {
   Search,
   Sparkles,
   Cpu,
-  BadgePercent
+  BadgePercent,
+  RefreshCw,
 } from 'lucide-react';
 import { Currency, Language, MarketData, WalletAccount } from '../../types/wallet';
 import { i18n } from '../../utils/i18n';
@@ -31,6 +32,7 @@ interface ReceiveTabProps {
   currency: Currency;
   lang: Language;
   onOpenLegacyScannerModal?: () => void;
+  onOpenAddressTypeSwitchModal?: () => void;
 }
 
 type BtcFormatKey = 'native_segwit' | 'taproot' | 'nested_segwit' | 'legacy_compressed' | 'legacy_uncompressed';
@@ -42,6 +44,7 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
   currency,
   lang,
   onOpenLegacyScannerModal,
+  onOpenAddressTypeSwitchModal,
 }) => {
   const [selectedChainId, setSelectedChainId] = useState<ChainId>('BTC');
   const [activeBtcFormat, setActiveBtcFormat] = useState<BtcFormatKey>('native_segwit');
@@ -309,6 +312,23 @@ export const ReceiveTab: React.FC<ReceiveTabProps> = ({
               <div className="text-[9px] text-orange-400 font-semibold mt-0.5">Paper / Casascius</div>
             </button>
           </div>
+
+          {/* Direct Switch Wallet Address Type Button */}
+          {onOpenAddressTypeSwitchModal && (
+            <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-t border-slate-800/80">
+              <span className="text-[10.5px] text-slate-400">
+                {lang === 'th' ? 'ต้องการเปลี่ยน Address ถาวรของกระเป๋านี้ หรือหายอดเหรียญ?' : 'Need to change wallet format permanently or scan missing coins?'}
+              </span>
+              <button
+                type="button"
+                onClick={onOpenAddressTypeSwitchModal}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10.5px] font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 shadow-sm shrink-0"
+              >
+                <RefreshCw className="w-3 h-3 text-amber-400" />
+                <span>{lang === 'th' ? 'สลับประเภทกระเป๋า & สแกนเหรียญ' : 'Switch Wallet Type & Scan'}</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
